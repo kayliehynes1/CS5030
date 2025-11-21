@@ -7,7 +7,7 @@ class Dashboard:
         self.app = app
     
     def show_dashboard(self):
-        """Display the main dashboard"""
+        """Main dashboard"""
         # Header
         header_frame = ttk.Frame(self.app.root)
         header_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -29,11 +29,11 @@ class Dashboard:
         
         # Navigation buttons
         nav_buttons = [
-            ("📊 Dashboard", self.show_upcoming_bookings),
-            ("➕ Create Booking", self.show_create_booking),
-            ("📅 My Bookings", self.show_my_bookings),
-            ("🏢 Available Rooms", self.show_room_browser),
-            ("👤 Profile", self.show_profile)
+            ("Dashboard", self.show_upcoming_bookings),
+            ("Create Booking", self.show_create_booking),
+            ("My Bookings", self.show_my_bookings),
+            ("Available Rooms", self.show_room_browser),
+            ("Profile", self.show_profile)
         ]
         
         for text, command in nav_buttons:
@@ -48,13 +48,13 @@ class Dashboard:
         self.show_upcoming_bookings()
     
     def clear_content(self):
-        """Clear the content area"""
+        """Clearing content area"""
         if hasattr(self, 'content_frame'):
             for widget in self.content_frame.winfo_children():
                 widget.destroy()
     
     def show_upcoming_bookings(self):
-        """Show upcoming bookings dashboard"""
+        """Show upcoming bookings """
         self.clear_content()
         
         try:
@@ -83,7 +83,7 @@ class Dashboard:
             
             # Attending bookings
             att_frame = ttk.Frame(notebook)
-            notebook.add(att_frame, text="✅ Bookings I'm Attending")
+            notebook.add(att_frame, text="Bookings I'm Attending")
             self._display_bookings_table(att_frame, 
                                        [b for b in bookings if not b.get('is_organizer')],
                                        show_actions=False)
