@@ -2,6 +2,7 @@ import requests
 import json
 
 class APIClient:
+    """talk to back end"""
     def __init__(self, base_url="http://localhost:5000/api"):
         self.base_url = base_url
         self.token = None
@@ -22,7 +23,7 @@ class APIClient:
         return self._get_mock_data(method, endpoint, data)
     
     def _get_mock_data(self, method, endpoint, data):
-        """Provide mock data for demonstration"""
+        """Provide mock data for demonstration --> speak to back end""" 
         if endpoint == "/auth/login":
             return {
                 "token": "mock_jwt_token",
