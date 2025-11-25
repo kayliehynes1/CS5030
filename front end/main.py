@@ -1,4 +1,6 @@
 import tkinter as tk
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 from auth_manager import AuthManager
 from dashboard import Dashboard
 from api_client import APIClient
@@ -8,8 +10,11 @@ class RoomBookingClient:
         self.root = root
         self.root.title("University Room Booking System")
         self.root.geometry("1000x700")
+
+        style=ttk.Style(theme='superhero')
         
-        self.api_client = APIClient()
+        
+        self.api_client = APIClient(base_url="http://localhost:8000")
         self.auth_manager = AuthManager(self)
         self.dashboard = Dashboard(self)
         
