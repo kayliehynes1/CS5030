@@ -7,6 +7,15 @@ from pydantic import BaseModel, Field
 class User(BaseModel):
     id: int
     name: str
+    email: str
+    password: str
+    role: str
+
+
+class UserPublic(BaseModel):
+    id: int
+    name: str
+    email: str
     role: str
 
 
@@ -27,9 +36,9 @@ class Booking(BaseModel):
 
 
 USERS: List[User] = [
-    User(id=1, name="Alice Johnson", role="organiser"),
-    User(id=2, name="Ben Lee", role="attendee"),
-    User(id=3, name="Chloe Smith", role="attendee"),
+    User(id=1, name="Alice Johnson", email="alice@example.com", password="password123", role="organiser"),
+    User(id=2, name="Ben Lee", email="ben@example.com", password="password123", role="attendee"),
+    User(id=3, name="Chloe Smith", email="chloe@example.com", password="password123", role="attendee"),
 ]
 
 ROOMS: List[Room] = [

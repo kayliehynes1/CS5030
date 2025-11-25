@@ -58,9 +58,12 @@ class Dashboard:
         self.clear_content()
         
         try:
-            bookings = self.app.api_client.get_upcoming_bookings()
-            
-            if not bookings:
+            bookings = self.app.api_client.get_bookings()
+            rooms = {room["id"]: room for room in self.app.api_client.get_all_rooms()}
+            users = {user["id"]: user for user in self.app.api_client.get_users()}
+            booking_rows = [self._map_booking_to_row(b, rooms, users) for b in bookings]
+
+            if not booking_rows:
                 no_bookings_frame = ttk.Frame(self.content_frame)
                 no_bookings_frame.pack(expand=True)
                 
@@ -69,27 +72,24 @@ class Dashboard:
                 ttk.Button(no_bookings_frame, text="Create Your First Booking",
                           command=self.show_create_booking).pack(pady=10)
                 return
-            
-            # Create notebook for different views
+
             notebook = ttk.Notebook(self.content_frame)
             notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            # Organized bookings
+
             org_frame = ttk.Frame(notebook)
-            notebook.add(org_frame, text="📋 My Organized Bookings")
-            self._display_bookings_table(org_frame, 
-                                       [b for b in bookings if b.get('is_organizer')],
-                                       show_actions=True)
-            
-            # Attending bookings
+            notebook.add(org_frame, text="My Organised Bookings")
+            self._display_bookings_table(
+                org_frame, [b for b in booking_rows if b.get("is_organizer")], show_actions=True
+            )
+
             att_frame = ttk.Frame(notebook)
             notebook.add(att_frame, text="Bookings I'm Attending")
-            self._display_bookings_table(att_frame, 
-                                       [b for b in bookings if not b.get('is_organizer')],
-                                       show_actions=False)
-            
+            self._display_bookings_table(
+                att_frame, [b for b in booking_rows if not b.get("is_organizer")], show_actions=False
+            )
+
         except Exception as e:
-            self._show_error("Unable to load bookings")
+            self._show_error(f"Unable to load bookings: {e}")
     
     def _display_bookings_table(self, parent, bookings, show_actions=False):
         """Display bookings in a table format"""
@@ -97,12 +97,10 @@ class Dashboard:
             ttk.Label(parent, text="No bookings found").pack(pady=50)
             return
         
-        # Create treeview
-        columns = ('Title', 'Room', 'Date', 'Time', 'Attendees', 'Status')
+        columns = ('ID', 'Room', 'Date', 'Time', 'Organiser', 'Attendees')
         tree = ttk.Treeview(parent, columns=columns, show='headings', height=12)
         
-        # Define headings
-        column_widths = {'Title': 150, 'Room': 120, 'Date': 100, 'Time': 120, 'Attendees': 100, 'Status': 100}
+        column_widths = {'ID': 60, 'Room': 150, 'Date': 110, 'Time': 160, 'Organiser': 140, 'Attendees': 110}
         for col in columns:
             tree.heading(col, text=col)
             tree.column(col, width=column_widths[col])
@@ -110,12 +108,12 @@ class Dashboard:
         # Add data
         for booking in bookings:
             tree.insert('', tk.END, values=(
-                booking.get('title', ''),
+                booking.get('id', ''),
                 booking.get('room_name', ''),
                 booking.get('date', ''),
-                f"{booking.get('start_time', '')} - {booking.get('end_time', '')}",
-                f"{booking.get('current_attendees', 0)}/{booking.get('capacity', 0)}",
-                booking.get('status', 'Confirmed')
+                booking.get('time', ''),
+                booking.get('organiser', ''),
+                booking.get('attendees', ''),
             ), tags=(str(booking.get('id')),))
         
         # Add scrollbar
@@ -201,7 +199,7 @@ class Dashboard:
                   command=self.check_availability).grid(row=len(fields)+2, column=0, columnspan=2, pady=10)
         
         # Attendees
-        ttk.Label(form_frame, text="Invite Attendees (emails, comma separated):").grid(
+        ttk.Label(form_frame, text="Invite Attendees (user IDs, comma separated):").grid(
             row=len(fields)+3, column=0, sticky=tk.W, pady=8)
         self.attendees_entry = ttk.Entry(form_frame, width=40)
         self.attendees_entry.grid(row=len(fields)+3, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
@@ -219,26 +217,45 @@ class Dashboard:
         date = self.form_widgets['date'].get()
         start_time = self.form_widgets['start_time'].get()
         end_time = self.form_widgets['end_time'].get()
-        
-        if not date:
-            messagebox.showerror("Error", "Please enter a date")
+
+        start_dt, end_dt = self._build_datetime_range(date, start_time, end_time)
+        if not start_dt or not end_dt:
+            messagebox.showerror("Error", "Please enter a valid date and time window")
             return
-        
+
         try:
-            rooms = self.app.api_client.get_available_rooms(date, start_time, end_time)
-            self.room_listbox.delete(0, tk.END)
-            
-            if rooms:
-                for room in rooms:
-                    room_info = f"{room['name']} | Cap: {room['capacity']} | Facilities: {', '.join(room.get('facilities', []))}"
-                    self.room_listbox.insert(tk.END, room_info)
-                    # Store room ID in listbox item data
-                    self.room_listbox.room_data = rooms
-            else:
-                self.room_listbox.insert(tk.END, "No rooms available for selected time")
-                
+            rooms = self.app.api_client.get_all_rooms()
+            bookings = self.app.api_client.get_bookings()
         except Exception as e:
-            messagebox.showerror("Error", "Unable to check room availability")
+            messagebox.showerror("Error", f"Unable to check room availability: {e}")
+            return
+
+        available_rooms = []
+        for room in rooms:
+            clashes = []
+            for booking in bookings:
+                if booking.get("room_id") != room.get("id"):
+                    continue
+                existing_start = self._parse_datetime(booking.get("start_time"))
+                existing_end = self._parse_datetime(booking.get("end_time"))
+                if not existing_start or not existing_end:
+                    continue
+                if existing_start.date() != start_dt.date():
+                    continue
+                if self._times_overlap(start_dt, end_dt, existing_start, existing_end):
+                    clashes.append(booking)
+            if not clashes:
+                available_rooms.append(room)
+
+        self.room_listbox.delete(0, tk.END)
+        self.room_listbox.room_data = available_rooms
+
+        if available_rooms:
+            for room in available_rooms:
+                room_info = f"{room['name']} | Cap: {room['capacity']} | Facilities: {', '.join(room.get('facilities', []))}"
+                self.room_listbox.insert(tk.END, room_info)
+        else:
+            self.room_listbox.insert(tk.END, "No rooms available for selected time")
     
     def get_selected_room(self):
         """Get selected room data"""
@@ -255,9 +272,9 @@ class Dashboard:
         start_time = self.form_widgets['start_time'].get()
         end_time = self.form_widgets['end_time'].get()
         notes = self.form_widgets['notes'].get("1.0", tk.END).strip() if hasattr(self.form_widgets['notes'], 'get') else self.form_widgets['notes'].get()
-        
+        current_user_id = self.app.current_user.get("id") if self.app.current_user else None
         selected_room = self.get_selected_room()
-        attendee_emails = [email.strip() for email in self.attendees_entry.get().split(",") if email.strip()]
+        attendee_ids = self._parse_attendee_ids(self.attendees_entry.get())
         
         # Validation
         if not title:
@@ -272,62 +289,77 @@ class Dashboard:
             messagebox.showerror("Error", "Please select a room")
             return
         
+        start_dt, end_dt = self._build_datetime_range(date, start_time, end_time)
+        if not start_dt or not end_dt:
+            messagebox.showerror("Error", "Please provide a valid start and end time")
+            return
+
+        if not current_user_id:
+            messagebox.showerror("Error", "You need to log in before creating a booking")
+            return
+        
         try:
-            booking_data = {
-                "title": title,
-                "date": date,
-                "start_time": start_time,
-                "end_time": end_time,
+            existing_bookings = self.app.api_client.get_bookings()
+            next_id = max([b.get("id", 0) for b in existing_bookings] + [0]) + 1
+            booking_payload = {
+                "id": next_id,
                 "room_id": selected_room["id"],
-                "attendee_emails": attendee_emails,
-                "notes": notes
+                "organiser_id": current_user_id,
+                "attendee_ids": attendee_ids,
+                "start_time": start_dt.isoformat(),
+                "end_time": end_dt.isoformat(),
             }
-            
-            response = self.app.api_client.create_booking(booking_data)
-            
+
+            response = self.app.api_client.create_booking(booking_payload)
             if response:
-                messagebox.showinfo("Success", "Booking created successfully!")
+                messagebox.showinfo("Success", f"Booking #{response.get('id', next_id)} created")
                 self.show_upcoming_bookings()
             else:
                 messagebox.showerror("Error", "Failed to create booking")
-                
+
         except Exception as e:
             messagebox.showerror("Error", f"Unable to create booking: {str(e)}")
     
     def show_my_bookings(self):
         """Show user's organized bookings for management"""
         self.clear_content()
-        
+
+        current_user_id = self.app.current_user.get("id") if self.app.current_user else None
         try:
-            bookings = self.app.api_client.get_organized_bookings()
-            
-            if not bookings:
+            bookings = self.app.api_client.get_bookings()
+            rooms = {room["id"]: room for room in self.app.api_client.get_all_rooms()}
+            users = {user["id"]: user for user in self.app.api_client.get_users()}
+            organised = [
+                self._map_booking_to_row(b, rooms, users)
+                for b in bookings
+                if b.get("organiser_id") == current_user_id
+            ]
+
+            if not organised:
                 ttk.Label(self.content_frame, text="You haven't organized any bookings", 
                          font=('Arial', 12)).pack(pady=50)
                 return
-            
-            # Header
+
             ttk.Label(self.content_frame, text="Manage My Bookings", 
                      font=('Arial', 16, 'bold')).pack(pady=(0, 20))
-            
-            # Bookings list
-            for booking in bookings:
+
+            for booking in organised:
                 self._create_booking_card(booking)
                 
         except Exception as e:
-            self._show_error("Unable to load bookings")
+            self._show_error(f"Unable to load bookings: {e}")
     
     def _create_booking_card(self, booking):
         """Create a booking card with management options"""
-        card_frame = ttk.LabelFrame(self.content_frame, text=booking['title'], padding="10")
+        card_frame = ttk.LabelFrame(self.content_frame, text=f"Booking #{booking['id']}", padding="10")
         card_frame.pack(fill=tk.X, pady=5, padx=10)
         
         # Booking info
-        info_text = f"Room: {booking['room_name']} | Date: {booking['date']} | Time: {booking['start_time']}-{booking['end_time']}"
+        info_text = f"Room: {booking['room_name']} | Date: {booking['date']} | Time: {booking['time']}"
         ttk.Label(card_frame, text=info_text).grid(row=0, column=0, sticky=tk.W)
         
         # Attendee info
-        attendee_text = f"Attendees: {booking.get('current_attendees', 0)}/{booking.get('capacity', 0)}"
+        attendee_text = f"Attendees: {booking.get('attendees', '')}"
         ttk.Label(card_frame, text=attendee_text).grid(row=1, column=0, sticky=tk.W)
         
         # Action buttons
@@ -346,12 +378,12 @@ class Dashboard:
     
     def edit_booking(self, booking):
         """Edit existing booking"""
-        messagebox.showinfo("Edit Booking", f"Edit booking: {booking['title']}\n\nThis would open an edit form similar to create booking.")
+        messagebox.showinfo("Edit Booking", f"Edit booking #{booking['id']}\n\nThis would open an edit form similar to create booking.")
     
     def cancel_booking(self, booking):
         """Cancel a booking"""
         if messagebox.askyesno("Confirm Cancellation", 
-                             f"Are you sure you want to cancel '{booking['title']}'?"):
+                             f"Are you sure you want to cancel booking #{booking['id']}?"):
             try:
                 success = self.app.api_client.cancel_booking(booking['id'])
                 if success:
@@ -482,7 +514,12 @@ class Dashboard:
         self.clear_content()
         
         try:
-            profile = self.app.api_client.get_user_profile() or self.app.current_user
+            profile = self.app.current_user or {}
+            if profile and profile.get("id"):
+                users = self.app.api_client.get_users()
+                matched = next((u for u in users if u.get("id") == profile.get("id")), None)
+                if matched:
+                    profile = matched
             
             profile_frame = ttk.Frame(self.content_frame)
             profile_frame.pack(expand=True, pady=50)
@@ -502,8 +539,58 @@ class Dashboard:
                      font=('Arial', 12)).pack(anchor=tk.W, pady=5)
             
         except Exception as e:
-            self._show_error("Unable to load profile")
-    
+            self._show_error(f"Unable to load profile: {e}")
+
+    def _map_booking_to_row(self, booking, rooms, users):
+        """Enrich a backend booking with display-friendly fields."""
+        start_dt = self._parse_datetime(booking.get("start_time"))
+        end_dt = self._parse_datetime(booking.get("end_time"))
+        room = rooms.get(booking.get("room_id"), {})
+        organiser = users.get(booking.get("organiser_id"), {})
+        current_user_id = self.app.current_user.get("id") if self.app.current_user else None
+
+        return {
+            "id": booking.get("id"),
+            "room_name": room.get("name", "Unknown"),
+            "date": start_dt.strftime("%Y-%m-%d") if start_dt else "",
+            "time": f"{start_dt.strftime('%H:%M') if start_dt else ''} - {end_dt.strftime('%H:%M') if end_dt else ''}",
+            "attendees": f"{len(booking.get('attendee_ids', []))}/{room.get('capacity', '?')}",
+            "organiser": organiser.get("name", "Unknown"),
+            "is_organizer": booking.get("organiser_id") == current_user_id,
+        }
+
+    def _parse_datetime(self, value):
+        try:
+            return datetime.fromisoformat(value) if value else None
+        except Exception:
+            return None
+
+    def _build_datetime_range(self, date_str, start_str, end_str):
+        try:
+            start_dt = datetime.fromisoformat(f"{date_str} {start_str}")
+            end_dt = datetime.fromisoformat(f"{date_str} {end_str}")
+        except Exception:
+            return None, None
+
+        if end_dt <= start_dt:
+            return None, None
+        return start_dt, end_dt
+
+    def _times_overlap(self, start_a, end_a, start_b, end_b):
+        return start_a < end_b and end_a > start_b
+
+    def _parse_attendee_ids(self, attendees_text):
+        attendee_ids = []
+        for value in attendees_text.split(","):
+            value = value.strip()
+            if not value:
+                continue
+            try:
+                attendee_ids.append(int(value))
+            except ValueError:
+                continue
+        return attendee_ids
+
     def _show_error(self, message):
         """Show error message"""
         error_frame = ttk.Frame(self.content_frame)
