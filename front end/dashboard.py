@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from datetime import datetime
 
 class Dashboard:
@@ -7,6 +7,8 @@ class Dashboard:
         self.app = app
         self.room_data = []  # Initialize room data
         self.current_bookings = {}  # Initialize current bookings for reference
+        self.unread_notification_count = 0  # Track unread notifications
+        self.notification_badge = None  # Reference to notification badge label
 
     def _validate_datetime_inputs(self, date: str, start_time: str, end_time: str) -> bool:
         """Shared validation for date/time fields used by create and edit flows."""
@@ -66,6 +68,21 @@ class Dashboard:
             return False
         return True
     
+    def update_notification_badge(self):
+        """Update the notification with current unread count"""
+        try:
+            result = self.app.api_client.get_unread_notification_count()
+            self.unread_notification_count = result.get('count', 0)
+            
+            if self.notification_badge:
+                if self.unread_notification_count > 0:
+                    self.notification_badge.config(text=f"🔔 ({self.unread_notification_count})")
+                else:
+                    self.notification_badge.config(text="🔔")
+        except Exception:
+            # Silently fail - not critical
+            pass
+    
     def show_dashboard(self):
         """Main dashboard"""
         # Header
@@ -100,6 +117,14 @@ class Dashboard:
             btn = ttk.Button(nav_frame, text=text, command=command)
             btn.pack(side=tk.LEFT, padx=5)
         
+        # Add Notifications button with badge
+        notif_btn = ttk.Button(nav_frame, text="🔔", command=self.show_notifications)
+        notif_btn.pack(side=tk.LEFT, padx=5)
+        self.notification_badge = notif_btn  # Keep reference for updates
+        
+        # Update notification count initially
+        self.update_notification_badge()
+        
         # Content area
         self.content_frame = ttk.Frame(self.app.root)
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
@@ -116,6 +141,9 @@ class Dashboard:
     def show_dashboard_view(self):
         """Show dashboard with upcoming and past bookings"""
         self.clear_content()
+        
+        # Update notification badge when navigating to dashboard
+        self.update_notification_badge()
         
         # Create notebook for upcoming vs past
         notebook = ttk.Notebook(self.content_frame)
@@ -276,6 +304,56 @@ class Dashboard:
             booking_id = tree.item(selection[0], "tags")[0]
             self.show_booking_details(booking_id)
     
+    def _show_reason_dialog(self, title, prompt):
+        """Show a dialog to get a cancellation/decline reason"""
+        dialog = tk.Toplevel(self.app.root)
+        dialog.title(title)
+        dialog.geometry("400x250")
+        dialog.grab_set()
+        
+        # Center the dialog
+        dialog.transient(self.app.root)
+        
+        result = {"reason": None, "confirmed": False}
+        
+        # Main frame
+        main_frame = ttk.Frame(dialog, padding="20")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Prompt label
+        ttk.Label(main_frame, text=prompt, 
+                 font=('Arial', 11), wraplength=350).pack(pady=(0, 15))
+        
+        # Reason entry
+        ttk.Label(main_frame, text="Reason (optional):", 
+                 font=('Arial', 10)).pack(anchor=tk.W)
+        
+        reason_text = tk.Text(main_frame, height=4, width=40, wrap=tk.WORD)
+        reason_text.pack(fill=tk.BOTH, expand=True, pady=(5, 15))
+        reason_text.focus()
+        
+        # Button frame
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=(10, 0))
+        
+        def confirm():
+            result["reason"] = reason_text.get("1.0", tk.END).strip() or None
+            result["confirmed"] = True
+            dialog.destroy()
+        
+        def cancel():
+            result["confirmed"] = False
+            dialog.destroy()
+        
+        ttk.Button(button_frame, text="Confirm", 
+                  command=confirm).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Cancel", 
+                  command=cancel).pack(side=tk.LEFT, padx=5)
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        return result
+    
     def show_booking_details(self, booking_id):
         """Show detailed booking information with management options"""
         try:
@@ -397,7 +475,7 @@ Notes: {booking.get('notes', 'None')}
             messagebox.showerror("Error", f"Unable to load booking details: {str(e)}")
     
     def _decline_booking(self, tree):
-        """Decline/leave a booking as attendee"""
+        """Decline/leave a booking as attendee with optional reason"""
         selection = tree.selection()
         if not selection:
             messagebox.showwarning("No Selection", "Please select a booking to leave")
@@ -409,19 +487,26 @@ Notes: {booking.get('notes', 'None')}
         booking = self.current_bookings.get(booking_id, {})
         booking_title = booking.get('title', 'this booking')
         
-        # Confirm action
-        if not messagebox.askyesno("Confirm", 
-                                   f"Are you sure you want to leave '{booking_title}'?\n\n"
-                                   "You will no longer be registered for this meeting."):
+        # Show reason dialog
+        result = self._show_reason_dialog(
+            "Decline/Leave Booking",
+            f"Are you sure you want to leave '{booking_title}'?\n\n"
+            "You will no longer be registered for this meeting.\n\n"
+            "You can optionally provide a reason:"
+        )
+        
+        if not result["confirmed"]:
             return
         
         try:
-            # Call API to decline invitation
-            response = self.app.api_client.decline_invitation(int(booking_id))
+            # Call API to decline invitation with optional reason
+            response = self.app.api_client.decline_invitation(int(booking_id), result["reason"])
             
             if response:
                 messagebox.showinfo("Success", 
                                   f"You have successfully left '{booking_title}'")
+                # Update notification badge
+                self.update_notification_badge()
                 # Refresh the bookings view
                 self.show_dashboard_view()
             else:
@@ -450,6 +535,8 @@ Notes: {booking.get('notes', 'None')}
             if response:
                 messagebox.showinfo("Success", 
                                   f"You have accepted the invitation to '{booking_title}'")
+                # Update notification badge
+                self.update_notification_badge()
                 # Refresh the bookings view
                 self.show_dashboard_view()
             else:
@@ -458,15 +545,163 @@ Notes: {booking.get('notes', 'None')}
         except Exception as e:
             messagebox.showerror("Error", f"Unable to accept invitation: {str(e)}")
     
-    def show_create_booking(self):
-        """Show booking creation form"""
+    def show_notifications(self):
+        """Show notifications view"""
         self.clear_content()
+        
+        main_frame = ttk.Frame(self.content_frame)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Header
+        header_frame = ttk.Frame(main_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        ttk.Label(header_frame, text="Notifications", 
+                 font=('Arial', 16, 'bold')).pack(side=tk.LEFT)
+        
+        ttk.Button(header_frame, text="Refresh", 
+                  command=self.show_notifications).pack(side=tk.RIGHT, padx=5)
+        
+        ttk.Button(header_frame, text="Mark All as Read", 
+                  command=self._mark_all_notifications_read).pack(side=tk.RIGHT, padx=5)
+        
+        try:
+            notifications = self.app.api_client.get_notifications()
+            
+            if not notifications:
+                no_notif_frame = ttk.Frame(main_frame)
+                no_notif_frame.pack(expand=True)
+                
+                ttk.Label(no_notif_frame, text="No notifications", 
+                         font=('Arial', 14)).pack(pady=20)
+                return
+            
+            # Create scrollable frame for notifications
+            canvas = tk.Canvas(main_frame)
+            scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
+            
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # Pack canvas and scrollbar
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Create notification cards
+            for notif in notifications:
+                self._create_notification_card(scrollable_frame, notif)
+            
+            # Update badge after showing notifications
+            self.update_notification_badge()
+            
+        except Exception as e:
+            self._show_error_in_frame(main_frame, "Unable to load notifications")
+    
+    def _create_notification_card(self, parent, notification):
+        """Create a notification card"""
+        # Determine card style based on read status
+        if notification['is_read']:
+            relief_style = 'flat'
+            bg_color = None
+        else:
+            relief_style = 'raised'
+            bg_color = None
+        
+        card_frame = ttk.LabelFrame(parent, text=notification['title'], padding="10", relief=relief_style)
+        card_frame.pack(fill=tk.X, pady=5, padx=10)
+        
+        # Notification type icon
+        type_icons = {
+            'booking_cancelled': '❌',
+            'invitation_declined': '✉️',
+            'booking_reminder': '⏰'
+        }
+        icon = type_icons.get(notification['type'], '📢')
+        
+        # Header with icon and time
+        header_frame = ttk.Frame(card_frame)
+        header_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        ttk.Label(header_frame, text=f"{icon} {notification['type'].replace('_', ' ').title()}", 
+                 font=('Arial', 10, 'bold')).pack(side=tk.LEFT)
+        
+        ttk.Label(header_frame, text=notification['created_at'], 
+                 font=('Arial', 8), foreground='gray').pack(side=tk.RIGHT)
+        
+        # Message
+        message_label = ttk.Label(card_frame, text=notification['message'], 
+                                 font=('Arial', 10), wraplength=700)
+        message_label.pack(fill=tk.X, pady=(0, 10))
+        
+        # Action buttons
+        button_frame = ttk.Frame(card_frame)
+        button_frame.pack(fill=tk.X)
+        
+        if notification['booking_id']:
+            ttk.Button(button_frame, text="View Booking", 
+                      command=lambda: self.show_booking_details(notification['booking_id'])).pack(side=tk.LEFT, padx=2)
+        
+        if not notification['is_read']:
+            ttk.Button(button_frame, text="Mark as Read", 
+                      command=lambda n_id=notification['id']: self._mark_notification_read(n_id),
+                      bootstyle="info").pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(button_frame, text="Delete", 
+                  command=lambda n_id=notification['id']: self._delete_notification(n_id),
+                  bootstyle="danger").pack(side=tk.RIGHT, padx=2)
+    
+    def _mark_notification_read(self, notification_id):
+        """Mark a single notification as read"""
+        try:
+            self.app.api_client.mark_notification_read(notification_id)
+            self.show_notifications()  # Refresh view
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to mark notification as read: {str(e)}")
+    
+    def _mark_all_notifications_read(self):
+        """Mark all notifications as read"""
+        try:
+            notifications = self.app.api_client.get_notifications()
+            for notif in notifications:
+                if not notif['is_read']:
+                    self.app.api_client.mark_notification_read(notif['id'])
+            self.show_notifications()  # Refresh view
+            messagebox.showinfo("Success", "All notifications marked as read")
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to mark notifications as read: {str(e)}")
+    
+    def _delete_notification(self, notification_id):
+        """Delete a notification"""
+        if messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this notification?"):
+            try:
+                self.app.api_client.delete_notification(notification_id)
+                self.show_notifications()  # Refresh view
+            except Exception as e:
+                messagebox.showerror("Error", f"Unable to delete notification: {str(e)}")
+    
+    def show_create_booking(self, preselected_room=None):
+        """Show booking creation form with optional pre-selected room"""
+        self.clear_content()
+        
+        # Update notification badge
+        self.update_notification_badge()
         
         form_frame = ttk.Frame(self.content_frame)
         form_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # Title
-        ttk.Label(form_frame, text="Create New Booking", 
+        if preselected_room:
+            title_text = f"Create New Booking - {preselected_room['name']}"
+        else:
+            title_text = "Create New Booking"
+        
+        ttk.Label(form_frame, text=title_text, 
                  font=('Arial', 16, 'bold')).grid(row=0, column=0, columnspan=2, pady=(0, 20))
         
         # Form fields
@@ -514,20 +749,39 @@ Notes: {booking.get('notes', 'None')}
         self.room_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         room_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
+        # If room is preselected, populate and select it
+        if preselected_room:
+            self.room_data = [preselected_room]
+            room_info = f"{preselected_room['name']} | Cap: {preselected_room['capacity']} | Facilities: {', '.join(preselected_room.get('facilities', []))}"
+            self.room_listbox.insert(tk.END, room_info)
+            self.room_listbox.selection_set(0)  # Select the room
+            
+            # Show a label indicating the room is pre-selected
+            preselect_label = ttk.Label(form_frame, 
+                                       text="✓ Room pre-selected from browser", 
+                                       font=('Arial', 9), 
+                                       foreground='green')
+            preselect_label.grid(row=len(fields)+2, column=1, sticky=tk.W, pady=(0, 5), padx=(10, 0))
+            row_offset = 1
+        else:
+            # Show instruction to check availability
+            self.room_listbox.insert(tk.END, "Click 'Check Available Rooms' to see available rooms")
+            row_offset = 0
+        
         # Check availability button
         ttk.Button(form_frame, text="Check Available Rooms", 
-                  command=self.check_availability).grid(row=len(fields)+2, column=0, columnspan=2, pady=10)
+                  command=self.check_availability).grid(row=len(fields)+2+row_offset, column=0, columnspan=2, pady=10)
         
         # Attendees
         ttk.Label(form_frame, text="Invite Attendees (emails, comma separated):").grid(
-            row=len(fields)+3, column=0, sticky=tk.W, pady=8)
+            row=len(fields)+3+row_offset, column=0, sticky=tk.W, pady=8)
         self.attendees_entry = ttk.Entry(form_frame, width=40)
-        self.attendees_entry.grid(row=len(fields)+3, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
+        self.attendees_entry.grid(row=len(fields)+3+row_offset, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
         
         # Submit button
         ttk.Button(form_frame, text="Create Booking", 
                   command=self.create_booking).grid(
-                  row=len(fields)+4, column=0, columnspan=2, pady=20)
+                  row=len(fields)+4+row_offset, column=0, columnspan=2, pady=20)
         
         # Configure grid weights
         form_frame.columnconfigure(1, weight=1)
@@ -589,6 +843,9 @@ Notes: {booking.get('notes', 'None')}
     def show_manage_bookings(self):
         """Show manage bookings view with organized and invited tabs"""
         self.clear_content()
+        
+        # Update notification badge
+        self.update_notification_badge()
         
         # Create notebook for organized vs invited
         notebook = ttk.Notebook(self.content_frame)
@@ -814,18 +1071,29 @@ Notes: {booking.get('notes', 'None')}
         self.check_availability_for_edit()
     
     def cancel_booking(self, booking):
-        """Cancel a booking"""
-        if messagebox.askyesno("Confirm Cancellation", 
-                             f"Are you sure you want to cancel '{booking['title']}'?"):
-            try:
-                success = self.app.api_client.cancel_booking(booking['id'])
-                if success:
-                    messagebox.showinfo("Success", "Booking cancelled successfully")
-                    self.show_manage_bookings()
-                else:
-                    messagebox.showerror("Error", "Failed to cancel booking")
-            except Exception as e:
-                messagebox.showerror("Error", f"Unable to cancel booking: {str(e)}")
+        """Cancel a booking with optional reason"""
+        # Show reason dialog
+        result = self._show_reason_dialog(
+            "Cancel Booking",
+            f"Are you sure you want to cancel '{booking['title']}'?\n\n"
+            "All attendees will be notified.\n\n"
+            "You can optionally provide a reason:"
+        )
+        
+        if not result["confirmed"]:
+            return
+        
+        try:
+            success = self.app.api_client.cancel_booking(booking['id'], result["reason"])
+            if success:
+                messagebox.showinfo("Success", "Booking cancelled successfully")
+                # Update notification badge
+                self.update_notification_badge()
+                self.show_manage_bookings()
+            else:
+                messagebox.showerror("Error", "Failed to cancel booking")
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to cancel booking: {str(e)}")
     
     def check_availability_for_edit(self):
         """Check room availability for editing (similar to check_availability but for edit form)"""
@@ -905,6 +1173,9 @@ Notes: {booking.get('notes', 'None')}
         """Show room browser"""
         self.clear_content()
         
+        # Update notification badge
+        self.update_notification_badge()
+        
         main_frame = ttk.Frame(self.content_frame)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
@@ -928,7 +1199,7 @@ Notes: {booking.get('notes', 'None')}
         ttk.Label(filter_frame, text="Facilities:").grid(row=0, column=2, sticky=tk.W, padx=(0, 10))
         self.facilities_var = tk.StringVar(value="Any")
         facilities_combo = ttk.Combobox(filter_frame, textvariable=self.facilities_var,
-                                       values=["Any", "Projector", "Whiteboard", "TV", "Video Conference"],
+                                       values=["Any", "Projector", "Whiteboard", "Display", "Video Conferencing"],
                                        state="readonly", width=15)
         facilities_combo.grid(row=0, column=3, padx=(0, 20))
         
@@ -985,10 +1256,16 @@ Notes: {booking.get('notes', 'None')}
             elif capacity_filter == "Large (16+)":
                 filtered_rooms = [r for r in filtered_rooms if r.get('capacity', 0) >= 16]
         
-        # Facilities filter
+        # Facilities filter - case insensitive matching
         facilities_filter = self.facilities_var.get()
         if facilities_filter != "Any":
-            filtered_rooms = [r for r in filtered_rooms if facilities_filter in r.get('facilities', [])]
+            # Convert filter to lowercase for comparison
+            filter_lower = facilities_filter.lower()
+            # Check if any facility in the room contains the filter text (case-insensitive)
+            filtered_rooms = [
+                r for r in filtered_rooms 
+                if any(filter_lower in facility.lower() for facility in r.get('facilities', []))
+            ]
         
         return filtered_rooms
     
@@ -1013,12 +1290,20 @@ Notes: {booking.get('notes', 'None')}
         facilities_label = ttk.Label(card_frame, text=facilities_text, wraplength=400)
         facilities_label.grid(row=3, column=0, sticky=tk.W)
         
+        # Add Create Booking button
+        book_button = ttk.Button(card_frame, text="Create Booking with this Room", 
+                                command=lambda r=room: self.show_create_booking(preselected_room=r))
+        book_button.grid(row=0, column=1, rowspan=4, padx=(10, 0), sticky=tk.E)
+        
         # Configure grid weights
         card_frame.columnconfigure(0, weight=1)
     
     def show_profile(self):
         """Show user profile"""
         self.clear_content()
+        
+        # Update notification badge
+        self.update_notification_badge()
         
         try:
             profile = self.app.api_client.get_user_profile() or self.app.current_user
