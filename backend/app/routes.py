@@ -2,6 +2,8 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timedelta
 
+from .storage import save_users, save_bookings
+
 from .data import (
     BOOKINGS,
     ROOMS,
@@ -30,18 +32,33 @@ router = APIRouter(prefix="/api")
 def booking_to_response(booking: Booking, current_user: User) -> BookingResponse:
     """
     Transform a Booking object to BookingResponse format for frontend.
-    Includes computed fields like room_name, current_attendees, is_organizer.
+    Includes computed fields like room_name, current_attendees, is_organizer, attendee_emails, invitation_status.
     """
     # Find the room to get name and capacity
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     room_name = room.name if room else "Unknown Room"
     capacity = room.capacity if room else 0
     
-    # Calculate current attendees (attendees + organizer)
+    # Calculate current attendees (accepted attendees + organizer, NOT pending)
     current_attendees = len(booking.attendee_ids) + 1
     
     # Check if current user is the organizer
     is_organizer = booking.organiser_id == current_user.id
+    
+    # Determine invitation status for current user
+    invitation_status = None
+    if not is_organizer:
+        if current_user.id in booking.pending_attendee_ids:
+            invitation_status = "pending"
+        elif current_user.id in booking.attendee_ids:
+            invitation_status = "accepted"
+    
+    # Get attendee emails (accepted only)
+    attendee_emails = []
+    for attendee_id in booking.attendee_ids:
+        user = next((u for u in USERS if u.id == attendee_id), None)
+        if user:
+            attendee_emails.append(user.email)
     
     return BookingResponse(
         id=booking.id,
@@ -54,7 +71,9 @@ def booking_to_response(booking: Booking, current_user: User) -> BookingResponse
         capacity=capacity,
         is_organizer=is_organizer,
         status=booking.status,
-        notes=booking.notes
+        notes=booking.notes,
+        attendee_emails=attendee_emails,
+        invitation_status=invitation_status
     )
 
 
@@ -78,11 +97,12 @@ def register(data: RegisterRequest) -> LoginResponse:
         name=data.name,
         email=data.email,
         password_hash=hash_password(data.password),
-        role=data.role or "Student",
+        role=data.role.lower() if data.role else "student",  # Normalize to lowercase
         failed_attempts=0,
         locked_until=None
     )
     USERS.append(new_user)
+    save_users(USERS)  # Persist to storage
     
     # Create JWT token
     token = create_access_token(new_user.id, new_user.email)
@@ -111,7 +131,7 @@ def login(credentials: LoginRequest) -> LoginResponse:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Check if account is locked (NFR-3.3)
-    if user.locked_until and user.locked_until > datetime.now():
+    if user.locked_until and user.locked_until > datetime.utcnow():
         raise HTTPException(
             status_code=423, 
             detail=f"Account locked until {user.locked_until.strftime('%H:%M:%S')}"
@@ -124,7 +144,7 @@ def login(credentials: LoginRequest) -> LoginResponse:
         
         # Lock account after 3 failed attempts (NFR-3.3)
         if user.failed_attempts >= 3:
-            user.locked_until = datetime.now() + timedelta(minutes=15)
+            user.locked_until = datetime.utcnow() + timedelta(minutes=15)
             raise HTTPException(
                 status_code=423, 
                 detail="Account locked for 15 minutes after 3 failed attempts"
@@ -135,6 +155,8 @@ def login(credentials: LoginRequest) -> LoginResponse:
     # Reset failed attempts on successful login
     user.failed_attempts = 0
     user.locked_until = None
+
+    save_users(USERS)
     
     # Create JWT token
     token = create_access_token(user.id, user.email)
@@ -204,11 +226,13 @@ def get_available_rooms(
 
 @router.get("/bookings/upcoming", response_model=List[BookingResponse])
 def get_upcoming_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
-    """Return upcoming bookings for the current user (as organiser or attendee)."""
-    now = datetime.now()
+    """Return upcoming bookings for the current user (as organiser, accepted attendee, or pending invitee)."""
+    now = datetime.utcnow()
     user_bookings = [
         b for b in BOOKINGS
-        if (b.organiser_id == current_user.id or current_user.id in b.attendee_ids)
+        if (b.organiser_id == current_user.id 
+            or current_user.id in b.attendee_ids 
+            or current_user.id in b.pending_attendee_ids)  # Include pending invitations
         and b.start_time > now
     ]
     sorted_bookings = sorted(user_bookings, key=lambda b: b.start_time)
@@ -226,6 +250,25 @@ def get_organized_bookings(current_user: User = Depends(get_current_user)) -> Li
     
     # Transform to BookingResponse format
     return [booking_to_response(b, current_user) for b in sorted_bookings]
+
+
+# NEW: Get past bookings endpoint
+@router.get("/bookings/past", response_model=List[BookingResponse])
+def get_past_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
+    """Return past bookings for the current user (as organiser or accepted attendee)."""
+    now = datetime.utcnow()
+    user_bookings = [
+        b for b in BOOKINGS
+        if (b.organiser_id == current_user.id 
+            or current_user.id in b.attendee_ids)
+        and b.end_time <= now
+    ]
+    
+    # Sort by start time (most recent first)
+    user_bookings.sort(key=lambda b: b.start_time, reverse=True)
+    
+    # Transform to response format
+    return [booking_to_response(b, current_user) for b in user_bookings]
 
 
 # NEW: Get user profile endpoint
@@ -253,6 +296,81 @@ def overlaps(a_start, a_end, b_start, b_end) -> bool:
     return a_start < b_end and b_start < a_end
 
 
+def _parse_request_times(date_str: str, start_str: str, end_str: str, *, allow_past: bool) -> tuple[datetime, datetime]:
+    """
+    Parse date/time strings into datetimes with basic validation shared by create/update.
+    allow_past controls whether past bookings are permitted (create forbids, update allows).
+    """
+    try:
+        booking_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        start_dt = datetime.strptime(start_str, "%H:%M").time()
+        end_dt = datetime.strptime(end_str, "%H:%M").time()
+        start = datetime.combine(booking_date, start_dt)
+        end = datetime.combine(booking_date, end_dt)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date or time format. Use YYYY-MM-DD for date and HH:MM for time.",
+        )
+
+    if end <= start:
+        raise HTTPException(status_code=400, detail="End time must be after start time.")
+
+    if not allow_past and start < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Cannot book in the past.")
+
+    return start, end
+
+
+def _resolve_attendees(attendee_emails: list[str]) -> list[int]:
+    """Convert attendee emails to user IDs or raise if any are invalid."""
+    attendee_ids: list[int] = []
+    invalid_emails: list[str] = []
+    for email in attendee_emails:
+        user = next((u for u in USERS if u.email == email), None)
+        if user:
+            attendee_ids.append(user.id)
+        else:
+            invalid_emails.append(email)
+
+    if invalid_emails:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid attendee emails: {', '.join(invalid_emails)}",
+        )
+
+    return attendee_ids
+
+
+def _get_room_or_404(room_id: int) -> Room:
+    room = next((r for r in ROOMS if r.id == room_id), None)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Room not found.")
+    return room
+
+
+def _validate_capacity(room: Room, accepted_count: int, pending_count: int) -> None:
+    """Ensure total attendees (accepted + pending + organiser) do not exceed capacity."""
+    total_people = accepted_count + pending_count + 1  # +1 organiser
+    if total_people > room.capacity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Room capacity is {room.capacity}, but {total_people} people specified.",
+        )
+
+
+def _ensure_room_available(room_id: int, start: datetime, end: datetime, *, exclude_booking_id: int | None = None) -> None:
+    """Check availability, optionally excluding a specific booking (for updates)."""
+    for booking in BOOKINGS:
+        if exclude_booking_id and booking.id == exclude_booking_id:
+            continue
+        if booking.room_id == room_id and overlaps(start, end, booking.start_time, booking.end_time):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Room already booked from {booking.start_time.strftime('%H:%M')} to {booking.end_time.strftime('%H:%M')}.",
+            )
+
+
 @router.post("/bookings", response_model=BookingResponse, status_code=201)
 def create_booking(
     req: CreateBookingRequest,
@@ -267,70 +385,22 @@ def create_booking(
     - Permission checks
     """
 
-    # --- 1. Parse date + time into proper datetime objects ---
-    try:
-        booking_date = datetime.strptime(req.date, "%Y-%m-%d").date()
-        start_dt = datetime.strptime(req.start_time, "%H:%M").time()
-        end_dt = datetime.strptime(req.end_time, "%H:%M").time()
-        start = datetime.combine(booking_date, start_dt)
-        end = datetime.combine(booking_date, end_dt)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date or time format. Use YYYY-MM-DD for date and HH:MM for time.")
+    start, end = _parse_request_times(req.date, req.start_time, req.end_time, allow_past=False)
+    room = _get_room_or_404(req.room_id)
+    attendee_ids = _resolve_attendees(req.attendee_emails)
+    _validate_capacity(room, accepted_count=0, pending_count=len(attendee_ids))
+    _ensure_room_available(req.room_id, start, end)
 
-    # Validate time range
-    if end <= start:
-        raise HTTPException(status_code=400, detail="End time must be after start time.")
-
-    # Validate not in the past
-    if start < datetime.now():
-        raise HTTPException(status_code=400, detail="Cannot book in the past.")
-
-    # --- 2. Check the room exists ---
-    room = next((r for r in ROOMS if r.id == req.room_id), None)
-    if room is None:
-        raise HTTPException(status_code=404, detail="Room not found.")
-
-    # --- 3. Convert attendee emails -> user IDs ---
-    attendee_ids = []
-    invalid_emails = []
-    for email in req.attendee_emails:
-        user = next((u for u in USERS if u.email == email), None)
-        if user:
-            attendee_ids.append(user.id)
-        else:
-            invalid_emails.append(email)
-    
-    if invalid_emails:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid attendee emails: {', '.join(invalid_emails)}"
-        )
-
-    # Capacity check (including organiser) - FR-2.8
-    total_people = len(attendee_ids) + 1  # +1 for organiser
-    if total_people > room.capacity:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Room capacity is {room.capacity}, but {total_people} people specified."
-        )
-
-    # --- 4. Availability check - FR-2.11 ---
-    for b in BOOKINGS:
-        if b.room_id == req.room_id and overlaps(start, end, b.start_time, b.end_time):
-            raise HTTPException(
-                status_code=409, 
-                detail=f"Room already booked from {b.start_time.strftime('%H:%M')} to {b.end_time.strftime('%H:%M')}."
-            )
-
-    # --- 5. Create new booking ID ---
+    # --- Create new booking ID ---
     new_id = max((b.id for b in BOOKINGS), default=0) + 1
 
-    # --- 6. Create final Booking object ---
+    # --- Create final Booking object ---
     new_booking = Booking(
         id=new_id,
         room_id=req.room_id,
         organiser_id=current_user.id,
-        attendee_ids=attendee_ids,
+        attendee_ids=[],  # Empty - attendees start as pending
+        pending_attendee_ids=attendee_ids,  # Invited users are pending until they accept
         title=req.title,
         notes=req.notes,
         start_time=start,
@@ -341,6 +411,7 @@ def create_booking(
 
     BOOKINGS.append(new_booking)
     
+    save_bookings(BOOKINGS)
     # Return transformed response
     return booking_to_response(new_booking, current_user)
 
@@ -363,60 +434,32 @@ def update_booking(
     if booking.organiser_id != current_user.id:
         raise HTTPException(status_code=403, detail="Only the organiser can modify this booking.")
 
-    # Parse and validate date/time
-    try:
-        booking_date = datetime.strptime(req.date, "%Y-%m-%d").date()
-        start_dt = datetime.strptime(req.start_time, "%H:%M").time()
-        end_dt = datetime.strptime(req.end_time, "%H:%M").time()
-        start = datetime.combine(booking_date, start_dt)
-        end = datetime.combine(booking_date, end_dt)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date or time format.")
-
-    if end <= start:
-        raise HTTPException(status_code=400, detail="End time must be after start time.")
-
-    # Convert attendee emails to IDs
-    attendee_ids = []
-    invalid_emails = []
-    for email in req.attendee_emails:
-        user = next((u for u in USERS if u.email == email), None)
-        if user:
-            attendee_ids.append(user.id)
-        else:
-            invalid_emails.append(email)
+    start, end = _parse_request_times(req.date, req.start_time, req.end_time, allow_past=True)
+    new_attendee_ids = _resolve_attendees(req.attendee_emails)
     
-    if invalid_emails:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid attendee emails: {', '.join(invalid_emails)}"
-        )
+    # Separate existing accepted attendees from new invitations
+    current_accepted = set(booking.attendee_ids)
+    all_requested = set(new_attendee_ids)
+    
+    # Keep existing accepted attendees
+    accepted_attendees = list(current_accepted & all_requested)
+    
+    # New attendees go to pending (those not currently accepted)
+    new_pending = list(all_requested - current_accepted)
+    
+    # Combine with existing pending (remove duplicates)
+    current_pending = set(booking.pending_attendee_ids)
+    all_pending = list((current_pending | set(new_pending)) - current_accepted)
 
-    # Check room exists
-    room = next((r for r in ROOMS if r.id == req.room_id), None)
-    if room is None:
-        raise HTTPException(status_code=404, detail="Room not found.")
-
-    # Capacity check
-    total_people = len(attendee_ids) + 1
-    if total_people > room.capacity:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Room capacity is {room.capacity}, but {total_people} people specified."
-        )
-
-    # Availability check (exclude current booking)
-    for b in BOOKINGS:
-        if b.id != booking.id and b.room_id == req.room_id and overlaps(start, end, b.start_time, b.end_time):
-            raise HTTPException(
-                status_code=409, 
-                detail=f"Room already booked from {b.start_time.strftime('%H:%M')} to {b.end_time.strftime('%H:%M')}."
-            )
+    room = _get_room_or_404(req.room_id)
+    _validate_capacity(room, accepted_count=len(accepted_attendees), pending_count=len(all_pending))
+    _ensure_room_available(req.room_id, start, end, exclude_booking_id=booking.id)
 
     # Update booking
     updated_booking = booking.copy(update={
         "room_id": req.room_id,
-        "attendee_ids": attendee_ids,
+        "attendee_ids": accepted_attendees,  # Keep accepted
+        "pending_attendee_ids": all_pending,  # New + existing pending
         "title": req.title,
         "notes": req.notes,
         "start_time": start,
@@ -425,6 +468,7 @@ def update_booking(
     })
 
     BOOKINGS[idx] = updated_booking
+    save_bookings(BOOKINGS)
     
     # Return transformed response
     return booking_to_response(updated_booking, current_user)
@@ -444,6 +488,7 @@ def delete_booking(
         raise HTTPException(status_code=403, detail="Only the organiser can delete this booking.")
 
     del BOOKINGS[idx]
+    save_bookings(BOOKINGS)
 
 # ============================================================================
 # INVITATION ENDPOINTS
@@ -487,18 +532,24 @@ def accept_invitation(
     """
     Accept an invitation to a booking (FR-3.1, FR-3.2).
     
-    Adds the current user to the booking's attendee list.
+    Moves the current user from pending to accepted attendees.
     Validates capacity and timing before accepting.
     """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
-    # Validation 1: Check if already attending
-    if current_user.id in booking.attendee_ids:
-        raise HTTPException(
-            status_code=400, 
-            detail="You are already registered for this booking"
-        )
+    # Validation 1: Must be in pending invitations
+    if current_user.id not in booking.pending_attendee_ids:
+        if current_user.id in booking.attendee_ids:
+            raise HTTPException(
+                status_code=400, 
+                detail="You have already accepted this invitation"
+            )
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="You don't have a pending invitation to this booking"
+            )
     
     # Validation 2: Organisers can't join as attendees
     if current_user.id == booking.organiser_id:
@@ -510,7 +561,7 @@ def accept_invitation(
     # Validation 3: Check room capacity (FR-2.8)
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     if room:
-        # Count: current attendees + organiser + new person
+        # Count: current accepted attendees + organiser + new person
         total_people = len(booking.attendee_ids) + 1 + 1
         if total_people > room.capacity:
             raise HTTPException(
@@ -519,17 +570,19 @@ def accept_invitation(
             )
     
     # Validation 4: Can't join meetings that already started
-    if booking.start_time < datetime.now():
+    if booking.start_time < datetime.utcnow():
         raise HTTPException(
             status_code=400, 
             detail="This booking has already started"
         )
     
-    # All validations passed - add user to attendees
+    # All validations passed - move from pending to accepted
+    booking.pending_attendee_ids.remove(current_user.id)
     booking.attendee_ids.append(current_user.id)
+    save_bookings(BOOKINGS)
     
     return {
-        "message": "Successfully registered for booking",
+        "message": "Successfully accepted invitation",
         "booking_id": booking_id,
         "booking_title": booking.title,
         "start_time": booking.start_time.isoformat()
@@ -544,17 +597,20 @@ def decline_invitation(
     """
     Decline an invitation or cancel attendance (FR-3.6).
     
-    Removes the current user from the booking's attendee list.
+    Removes the current user from pending or accepted attendees.
     Organisers should use DELETE to cancel the entire booking.
     """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
-    # Validation 1: Must be attending to decline
-    if current_user.id not in booking.attendee_ids:
+    # Validation 1: Must be in pending or accepted list
+    is_pending = current_user.id in booking.pending_attendee_ids
+    is_accepted = current_user.id in booking.attendee_ids
+    
+    if not is_pending and not is_accepted:
         raise HTTPException(
             status_code=400, 
-            detail="You are not registered for this booking"
+            detail="You don't have an invitation to this booking"
         )
     
     # Validation 2: Organisers should delete, not decline
@@ -564,19 +620,26 @@ def decline_invitation(
             detail="Organisers cannot decline their own bookings. Use DELETE /bookings/{id} to cancel."
         )
     
-    # Validation 3: Can't cancel after meeting started
-    if booking.start_time < datetime.now():
+    # Validation 3: Can't cancel after meeting started (only for accepted)
+    if is_accepted and booking.start_time < datetime.utcnow():
         raise HTTPException(
             status_code=400, 
             detail="Cannot cancel attendance after meeting has started"
         )
     
-    # All validations passed - remove user from attendees
-    booking.attendee_ids.remove(current_user.id)
+    # All validations passed - remove user from pending or accepted
+    if is_pending:
+        booking.pending_attendee_ids.remove(current_user.id)
+        message = "Successfully declined invitation"
+    else:
+        booking.attendee_ids.remove(current_user.id)
+        message = "Successfully cancelled your attendance"
+    
+    save_bookings(BOOKINGS)
     
     return {
-        "message": "Successfully cancelled your registration",
+        "message": message,
         "booking_id": booking_id,
         "booking_title": booking.title,
-        "removed_at": datetime.now().isoformat()
+        "removed_at": datetime.utcnow().isoformat()
     }

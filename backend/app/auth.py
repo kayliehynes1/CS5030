@@ -50,6 +50,8 @@ class RegisterRequest(BaseModel):
     password: str
     role: str = "student"
 
+
+
 def get_current_user(authorization: str = Header(None)):
 
     from .data import USERS

@@ -28,7 +28,8 @@ class Booking(BaseModel):
     id: int
     room_id: int
     organiser_id: int
-    attendee_ids: List[int] = Field(default_factory=list)
+    attendee_ids: List[int] = Field(default_factory=list)  # Accepted attendees
+    pending_attendee_ids: List[int] = Field(default_factory=list)  # Pending invitations
     title: str
     notes: Optional[str] = None
     start_time: datetime
@@ -64,11 +65,13 @@ class BookingResponse(BaseModel):
     is_organizer: bool
     status: str
     notes: Optional[str] = None
+    attendee_emails: List[str] = Field(default_factory=list)  # Added for showing attendees
+    invitation_status: Optional[str] = None  # "pending", "accepted", or None (if organizer)
 
 USERS: List[User] = [
-    User(id=1, name="Alice Johnson", email="alicejohnson@st-andrews.ac.uk", password_hash=hash_password("password123"), role="Student"),
-    User(id=2, name="Ben Lee", email="benlee@st-andrews.ac.uk", password_hash=hash_password("password012!"), role="Student"),
-    User(id=3, name="Chloe Smith", email="chloesmith@st-andrews.ac.uk", password_hash=hash_password("password2025"), role="Staff"),
+    User(id=1, name="Alice Johnson", email="alicejohnson@st-andrews.ac.uk", password_hash=hash_password("password123"), role="student"),
+    User(id=2, name="Ben Lee", email="benlee@st-andrews.ac.uk", password_hash=hash_password("password012!"), role="student"),
+    User(id=3, name="Chloe Smith", email="chloesmith@st-andrews.ac.uk", password_hash=hash_password("password2025"), role="staff"),
 ]
 
 ROOMS: List[Room] = [
