@@ -11,10 +11,9 @@ class RoomBookingClient:
         self.root.title("University Room Booking System")
         self.root.geometry("1000x700")
 
-        style=ttk.Style(theme='superhero')
+        style = ttk.Style(theme='superhero')
         
-        
-        self.api_client = APIClient(base_url="http://localhost:8000")
+        self.api_client = APIClient()
         self.auth_manager = AuthManager(self)
         self.dashboard = Dashboard(self)
         
