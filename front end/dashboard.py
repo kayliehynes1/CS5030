@@ -76,9 +76,9 @@ class Dashboard:
             
             if self.notification_badge:
                 if self.unread_notification_count > 0:
-                    self.notification_badge.config(text=f"🔔 ({self.unread_notification_count})")
+                    self.notification_badge.config(text=f"({self.unread_notification_count})")
                 else:
-                    self.notification_badge.config(text="🔔")
+                    self.notification_badge.config(text="0")
         except Exception:
             # Silently fail - not critical
             pass
@@ -118,7 +118,7 @@ class Dashboard:
             btn.pack(side=tk.LEFT, padx=5)
         
         # Add Notifications button with badge
-        notif_btn = ttk.Button(nav_frame, text="🔔", command=self.show_notifications)
+        notif_btn = ttk.Button(nav_frame, command=self.show_notifications)
         notif_btn.pack(side=tk.LEFT, padx=5)
         self.notification_badge = notif_btn  # Keep reference for updates
         
@@ -151,12 +151,12 @@ class Dashboard:
         
         # Upcoming bookings tab
         upcoming_frame = ttk.Frame(notebook)
-        notebook.add(upcoming_frame, text="📅 Upcoming Bookings")
+        notebook.add(upcoming_frame, text="Upcoming Bookings")
         self._show_upcoming_bookings_content(upcoming_frame)
         
         # Past bookings tab
         past_frame = ttk.Frame(notebook)
-        notebook.add(past_frame, text="📋 Past Bookings")
+        notebook.add(past_frame, text="    Past Bookings")
         self._show_past_bookings_content(past_frame)
     
     def _show_upcoming_bookings_content(self, parent):
@@ -853,12 +853,12 @@ Notes: {booking.get('notes', 'None')}
         
         # Organized meetings tab
         organized_frame = ttk.Frame(notebook)
-        notebook.add(organized_frame, text="📋 Organized Meetings")
+        notebook.add(organized_frame, text="Organized Meetings")
         self._show_organized_meetings_content(organized_frame)
         
         # Invited meetings tab
         invited_frame = ttk.Frame(notebook)
-        notebook.add(invited_frame, text="📬 Invited Meetings")
+        notebook.add(invited_frame, text="Invited Meetings")
         self._show_invited_meetings_content(invited_frame)
     
     def _show_organized_meetings_content(self, parent):
@@ -920,12 +920,12 @@ Notes: {booking.get('notes', 'None')}
             
             # Pending invitations sub-tab
             pending_frame = ttk.Frame(sub_notebook)
-            sub_notebook.add(pending_frame, text="⏳ Pending Invitations")
+            sub_notebook.add(pending_frame, text="Pending Invitations")
             self._display_bookings_table(pending_frame, pending, action_type='pending')
             
             # Accepted bookings sub-tab
             accepted_frame = ttk.Frame(sub_notebook)
-            sub_notebook.add(accepted_frame, text="✓ Accepted")
+            sub_notebook.add(accepted_frame, text="Accepted")
             self._display_bookings_table(accepted_frame, accepted, action_type='accepted')
             
         except Exception as e:
