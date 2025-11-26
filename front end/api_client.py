@@ -1,20 +1,21 @@
-import json
 import requests
-
+import json
 
 class APIClient:
-    """HTTP client for the FastAPI backend."""
-
-    def __init__(self, base_url="http://localhost:8000"):
-        self.base_url = base_url.rstrip("/")
+    """talk to back end"""
+    def __init__(self, base_url="http://localhost:8000/api"):
+        self.base_url = base_url
         self.token = None
         self.headers = {}
-
+    
     def set_token(self, token):
-        """Store auth token (not required by the backend but kept for UI state)."""
+        """Set authentication token"""
         self.token = token
-        self.headers = {"Authorization": f"Bearer {token}"} if token else {}
-
+        if token:
+            self.headers = {"Authorization": f"Bearer {token}"}
+        else:
+            self.headers = {}
+    
     def make_request(self, method, endpoint, data=None, params=None):
         """Generic request helper with basic error handling."""
         url = f"{self.base_url}{endpoint}"
@@ -55,34 +56,56 @@ class APIClient:
             raise Exception("Invalid JSON response from server")
         except Exception as e:
             raise Exception(f"Request failed: {str(e)}")
-
+    
+    
     def health(self):
         return self.make_request("GET", "/health")
-
-    def get_users(self):
-        return self.make_request("GET", "/users")
-
-    def get_all_rooms(self):
-        return self.make_request("GET", "/rooms")
-
-    def get_bookings(self):
-        return self.make_request("GET", "/bookings")
-
-    def create_booking(self, booking_data):
-        return self.make_request("POST", "/bookings", booking_data)
-
-    def update_booking(self, booking_id, booking_data):
-        return self.make_request("PUT", f"/bookings/{booking_id}", booking_data)
-
-    def cancel_booking(self, booking_id):
-        return self.make_request("DELETE", f"/bookings/{booking_id}")
-
+    
+    # Auth endpoints
     def login(self, email, password):
         return self.make_request("POST", "/auth/login", {"email": email, "password": password})
-
-    def register(self, name, email, password, role="attendee"):
+    
+    def register(self, name, email, password, role="student"):
         return self.make_request(
             "POST",
             "/auth/register",
             {"name": name, "email": email, "password": password, "role": role},
         )
+    
+    # Booking endpoints
+    def get_upcoming_bookings(self):
+        return self.make_request("GET", "/bookings/upcoming")
+    
+    def get_organized_bookings(self):
+        return self.make_request("GET", "/bookings/organized")
+    
+    def create_booking(self, booking_data):
+        return self.make_request("POST", "/bookings", booking_data)
+    
+    def update_booking(self, booking_id, booking_data):
+        return self.make_request("PUT", f"/bookings/{booking_id}", booking_data)
+    
+    def cancel_booking(self, booking_id):
+        return self.make_request("DELETE", f"/bookings/{booking_id}")
+    
+    def get_booking(self, booking_id):
+        return self.make_request("GET", f"/bookings/{booking_id}")
+    
+    def accept_invitation(self, booking_id):
+        return self.make_request("POST", f"/bookings/{booking_id}/accept")
+    
+    def decline_invitation(self, booking_id):
+        """Decline an invitation to a booking"""
+        return self.make_request("POST", f"/bookings/{booking_id}/decline")
+        
+    # Room endpoints
+    def get_available_rooms(self, date, start_time, end_time):
+        params = {"date": date, "start_time": start_time, "end_time": end_time}
+        return self.make_request("GET", "/rooms/available", params)
+    
+    def get_all_rooms(self):
+        return self.make_request("GET", "/rooms")
+    
+    # User endpoints
+    def get_user_profile(self):
+        return self.make_request("GET", "/user/profile")

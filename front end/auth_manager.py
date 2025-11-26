@@ -113,10 +113,10 @@ class AuthManager:
 
         ttk.Label(frame, text="Role:", font=("Arial", 10)).grid(row=3, column=0, sticky=tk.W, pady=8)
         self.reg_role = ttk.Combobox(
-            frame, values=["organiser", "attendee"], state="readonly", width=28
+            frame, values=["Student", "Staff"], state="readonly", width=28
         )
         self.reg_role.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-        self.reg_role.set("attendee")
+        self.reg_role.set("Student")
 
         btns = ttk.Frame(frame)
         btns.grid(row=4, column=0, columnspan=2, pady=15)
@@ -128,7 +128,7 @@ class AuthManager:
         name = self.reg_name.get().strip()
         email = self.reg_email.get().strip()
         password = self.reg_password.get()
-        role = self.reg_role.get().strip() or "attendee"
+        role = self.reg_role.get().strip() or "Student"
 
         if not name or not email or not password:
             messagebox.showerror("Error", "Please fill in all fields")
