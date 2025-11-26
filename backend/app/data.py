@@ -36,6 +36,18 @@ class Booking(BaseModel):
     end_time: datetime
     visibility: str = "private" 
     status: str = "confirmed" 
+    reminder_sent: bool = False  # Track if 1-hour reminder was sent
+
+class Notification(BaseModel):
+    """Notification model for user notifications"""
+    id: int
+    user_id: int  # Recipient of notification
+    type: str  # "booking_cancelled", "invitation_declined", "booking_reminder"
+    title: str
+    message: str
+    booking_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_read: bool = False
 
 class CreateBookingRequest(BaseModel):
     room_id: int
@@ -46,6 +58,14 @@ class CreateBookingRequest(BaseModel):
     notes: Optional[str] = None
     visibility: str = "private"
     attendee_emails: List[str] = []
+
+class CancelBookingRequest(BaseModel):
+    """Request model for cancelling a booking with optional reason"""
+    reason: Optional[str] = None
+
+class DeclineInvitationRequest(BaseModel):
+    """Request model for declining an invitation with optional reason"""
+    reason: Optional[str] = None
 
 class PublicUser(BaseModel):
     id: int
@@ -67,6 +87,16 @@ class BookingResponse(BaseModel):
     notes: Optional[str] = None
     attendee_emails: List[str] = Field(default_factory=list)  # Added for showing attendees
     invitation_status: Optional[str] = None  # "pending", "accepted", or None (if organizer)
+
+class NotificationResponse(BaseModel):
+    """Notification response for frontend"""
+    id: int
+    type: str
+    title: str
+    message: str
+    booking_id: Optional[int]
+    created_at: str
+    is_read: bool
 
 USERS: List[User] = [
     User(id=1, name="Alice Johnson", email="alicejohnson@st-andrews.ac.uk", password_hash=hash_password("password123"), role="student"),
@@ -100,3 +130,6 @@ BOOKINGS: List[Booking] = [
         end_time=_base_time + timedelta(hours=3),
     ),
 ]
+
+# Store notifications
+NOTIFICATIONS: List[Notification] = []

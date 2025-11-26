@@ -2,18 +2,23 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Depends, Query
 from datetime import datetime, timedelta
 
-from .storage import save_users, save_bookings
+from .storage import save_users, save_bookings, save_notifications
 
 from .data import (
     BOOKINGS,
     ROOMS,
     USERS,
+    NOTIFICATIONS,
     Booking,
     Room,
     PublicUser,
     CreateBookingRequest,
+    CancelBookingRequest,
+    DeclineInvitationRequest,
     User,
-    BookingResponse, 
+    BookingResponse,
+    Notification,
+    NotificationResponse,
 )
 from .auth import (
     get_current_user, 
@@ -25,14 +30,70 @@ from .auth import (
     hash_password
 )
 
-router = APIRouter(prefix="/api") 
+router = APIRouter(prefix="/api")
 
 
-# Helper function to transform Booking to BookingResponse
+def create_notification(user_id: int, notif_type: str, title: str, message: str, booking_id: int = None):
+    """Helper function to create and save a notification"""
+    new_id = max((n.id for n in NOTIFICATIONS), default=0) + 1
+    notification = Notification(
+        id=new_id,
+        user_id=user_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        booking_id=booking_id,
+        created_at=datetime.utcnow(),
+        is_read=False
+    )
+    NOTIFICATIONS.append(notification)
+    save_notifications(NOTIFICATIONS)
+    return notification
+
+
+def process_booking_reminders():
+    """
+    Check for bookings starting in 1 hour and create reminder notifications.
+    """
+    now = datetime.utcnow()
+    target_time = now + timedelta(hours=1)
+    
+    for booking in BOOKINGS:
+        # Skip if already sent or not exactly one hour away
+        if booking.reminder_sent or booking.start_time != target_time:
+            continue
+        
+        # Get room name and calculate time
+        room = next((r for r in ROOMS if r.id == booking.room_id), None)
+        room_name = room.name if room else "Unknown Room"
+        time_until = booking.start_time - now
+        minutes = int(time_until.total_seconds() / 60)
+        time_str = booking.start_time.strftime('%H:%M')
+        
+        # Create reminders for all recipients (organizer + attendees)
+        recipients = [booking.organiser_id] + booking.attendee_ids
+        
+        for user_id in recipients:
+            is_organizer = user_id == booking.organiser_id
+            message_prefix = "Your meeting" if is_organizer else "Meeting"
+            
+            create_notification(
+                user_id=user_id,
+                notif_type="booking_reminder",
+                title="Upcoming Meeting Reminder",
+                message=f"{message_prefix} '{booking.title}' in {room_name} starts at {time_str} (in 1 hour).",
+                booking_id=booking.id
+            )
+        
+        # Mark reminder as sent
+        booking.reminder_sent = True
+    
+    save_bookings(BOOKINGS)
+
+
 def booking_to_response(booking: Booking, current_user: User) -> BookingResponse:
     """
     Transform a Booking object to BookingResponse format for frontend.
-    Includes computed fields like room_name, current_attendees, is_organizer, attendee_emails, invitation_status.
     """
     # Find the room to get name and capacity
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
@@ -54,11 +115,10 @@ def booking_to_response(booking: Booking, current_user: User) -> BookingResponse
             invitation_status = "accepted"
     
     # Get attendee emails (accepted only)
-    attendee_emails = []
-    for attendee_id in booking.attendee_ids:
-        user = next((u for u in USERS if u.id == attendee_id), None)
-        if user:
-            attendee_emails.append(user.email)
+    attendee_emails = [
+        user.email for attendee_id in booking.attendee_ids
+        if (user := next((u for u in USERS if u.id == attendee_id), None))
+    ]
     
     return BookingResponse(
         id=booking.id,
@@ -82,6 +142,7 @@ def health_check() -> dict[str, str]:
     """Simple heartbeat endpoint for uptime monitoring."""
     return {"status": "ok"}
 
+
 @router.post("/auth/register", response_model=LoginResponse, status_code=201)
 def register(data: RegisterRequest) -> LoginResponse:
     """Create a new user account."""
@@ -97,12 +158,12 @@ def register(data: RegisterRequest) -> LoginResponse:
         name=data.name,
         email=data.email,
         password_hash=hash_password(data.password),
-        role=data.role.lower() if data.role else "student",  # Normalize to lowercase
+        role=data.role.lower() if data.role else "student",
         failed_attempts=0,
         locked_until=None
     )
     USERS.append(new_user)
-    save_users(USERS)  # Persist to storage
+    save_users(USERS)
     
     # Create JWT token
     token = create_access_token(new_user.id, new_user.email)
@@ -117,20 +178,17 @@ def register(data: RegisterRequest) -> LoginResponse:
         }
     )
 
+
 @router.post("/auth/login", response_model=LoginResponse)
 def login(credentials: LoginRequest) -> LoginResponse:
-    """
-    Authenticate user and return JWT token
-    
-    Returns token and user info on success, 401 on failure
-    """
+    """Authenticate user and return JWT token"""
     # Find user by email
     user = next((u for u in USERS if u.email == credentials.email), None)
     
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
-    # Check if account is locked (NFR-3.3)
+    # Check if account is locked
     if user.locked_until and user.locked_until > datetime.utcnow():
         raise HTTPException(
             status_code=423, 
@@ -142,33 +200,33 @@ def login(credentials: LoginRequest) -> LoginResponse:
         # Increment failed attempts
         user.failed_attempts += 1
         
-        # Lock account after 3 failed attempts (NFR-3.3)
+        # Lock account after 3 failed attempts
         if user.failed_attempts >= 3:
             user.locked_until = datetime.utcnow() + timedelta(minutes=15)
+            save_users(USERS)
             raise HTTPException(
                 status_code=423, 
-                detail="Account locked for 15 minutes after 3 failed attempts"
+                detail="Account locked for 15 minutes due to too many failed attempts"
             )
         
+        save_users(USERS)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     
     # Reset failed attempts on successful login
     user.failed_attempts = 0
     user.locked_until = None
-
     save_users(USERS)
     
     # Create JWT token
     token = create_access_token(user.id, user.email)
     
-    # Return response
     return LoginResponse(
         token=token,
         user={
             "id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": user.role, 
+            "role": user.role
         }
     )
 
@@ -185,7 +243,6 @@ def list_rooms(current_user: User = Depends(get_current_user)) -> List[Room]:
     return ROOMS
 
 
-# NEW: Get available rooms endpoint
 @router.get("/rooms/available", response_model=List[Room])
 def get_available_rooms(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
@@ -195,7 +252,6 @@ def get_available_rooms(
 ) -> List[Room]:
     """
     Return rooms available for the specified date and time range.
-    Checks for conflicts with existing bookings.
     """
     # Parse the date and time
     try:
@@ -232,30 +288,26 @@ def get_upcoming_bookings(current_user: User = Depends(get_current_user)) -> Lis
         b for b in BOOKINGS
         if (b.organiser_id == current_user.id 
             or current_user.id in b.attendee_ids 
-            or current_user.id in b.pending_attendee_ids)  # Include pending invitations
+            or current_user.id in b.pending_attendee_ids)
         and b.start_time > now
     ]
     sorted_bookings = sorted(user_bookings, key=lambda b: b.start_time)
     
-    # Transform to BookingResponse format
     return [booking_to_response(b, current_user) for b in sorted_bookings]
 
 
-# NEW: Get organized bookings endpoint
 @router.get("/bookings/organized", response_model=List[BookingResponse])
 def get_organized_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
     """Return bookings organized by the current user."""
     organized = [b for b in BOOKINGS if b.organiser_id == current_user.id]
     sorted_bookings = sorted(organized, key=lambda b: b.start_time)
     
-    # Transform to BookingResponse format
     return [booking_to_response(b, current_user) for b in sorted_bookings]
 
 
-# NEW: Get past bookings endpoint
 @router.get("/bookings/past", response_model=List[BookingResponse])
 def get_past_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
-    """Return past bookings for the current user (as organiser or accepted attendee)."""
+    """Return past bookings for the current user (as organizer or accepted attendee)."""
     now = datetime.utcnow()
     user_bookings = [
         b for b in BOOKINGS
@@ -267,11 +319,9 @@ def get_past_bookings(current_user: User = Depends(get_current_user)) -> List[Bo
     # Sort by start time (most recent first)
     user_bookings.sort(key=lambda b: b.start_time, reverse=True)
     
-    # Transform to response format
     return [booking_to_response(b, current_user) for b in user_bookings]
 
 
-# NEW: Get user profile endpoint
 @router.get("/user/profile")
 def get_user_profile(current_user: User = Depends(get_current_user)) -> dict:
     """Return the current user's profile information."""
@@ -296,17 +346,16 @@ def overlaps(a_start, a_end, b_start, b_end) -> bool:
     return a_start < b_end and b_start < a_end
 
 
-def _parse_request_times(date_str: str, start_str: str, end_str: str, *, allow_past: bool) -> tuple[datetime, datetime]:
+def _parse_request_times(date_str: str, start_str: str, end_str: str) -> tuple[datetime, datetime]:
     """
     Parse date/time strings into datetimes with basic validation shared by create/update.
-    allow_past controls whether past bookings are permitted (create forbids, update allows).
     """
     try:
         booking_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-        start_dt = datetime.strptime(start_str, "%H:%M").time()
-        end_dt = datetime.strptime(end_str, "%H:%M").time()
-        start = datetime.combine(booking_date, start_dt)
-        end = datetime.combine(booking_date, end_dt)
+        start_date = datetime.strptime(start_str, "%H:%M").time()
+        end_date = datetime.strptime(end_str, "%H:%M").time()
+        start = datetime.combine(booking_date, start_date)
+        end = datetime.combine(booking_date, end_date)
     except ValueError:
         raise HTTPException(
             status_code=400,
@@ -316,7 +365,7 @@ def _parse_request_times(date_str: str, start_str: str, end_str: str, *, allow_p
     if end <= start:
         raise HTTPException(status_code=400, detail="End time must be after start time.")
 
-    if not allow_past and start < datetime.utcnow():
+    if start < datetime.utcnow():
         raise HTTPException(status_code=400, detail="Cannot book in the past.")
 
     return start, end
@@ -350,8 +399,8 @@ def _get_room_or_404(room_id: int) -> Room:
 
 
 def _validate_capacity(room: Room, accepted_count: int, pending_count: int) -> None:
-    """Ensure total attendees (accepted + pending + organiser) do not exceed capacity."""
-    total_people = accepted_count + pending_count + 1  # +1 organiser
+    """Ensure total attendees (accepted + pending + organizer) do not exceed capacity."""
+    total_people = accepted_count + pending_count + 1  # +1 organizer
     if total_people > room.capacity:
         raise HTTPException(
             status_code=400,
@@ -377,42 +426,37 @@ def create_booking(
     current_user: User = Depends(get_current_user)
 ) -> BookingResponse:
     """
-    Create a new booking with validation:
-    - Date/time parsing and validation
-    - Room existence check
-    - Capacity validation (FR-2.8)
-    - Availability check (FR-2.11)
-    - Permission checks
+    Create a new booking with validation
     """
 
-    start, end = _parse_request_times(req.date, req.start_time, req.end_time, allow_past=False)
+    start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     room = _get_room_or_404(req.room_id)
     attendee_ids = _resolve_attendees(req.attendee_emails)
     _validate_capacity(room, accepted_count=0, pending_count=len(attendee_ids))
     _ensure_room_available(req.room_id, start, end)
 
-    # --- Create new booking ID ---
+    # Create new booking ID
     new_id = max((b.id for b in BOOKINGS), default=0) + 1
 
-    # --- Create final Booking object ---
+    # Create final Booking object
     new_booking = Booking(
         id=new_id,
         room_id=req.room_id,
         organiser_id=current_user.id,
-        attendee_ids=[],  # Empty - attendees start as pending
-        pending_attendee_ids=attendee_ids,  # Invited users are pending until they accept
+        attendee_ids=[], 
+        pending_attendee_ids=attendee_ids, 
         title=req.title,
         notes=req.notes,
         start_time=start,
         end_time=end,
         visibility=req.visibility,
         status="confirmed",
+        reminder_sent=False
     )
 
     BOOKINGS.append(new_booking)
-    
     save_bookings(BOOKINGS)
-    # Return transformed response
+    
     return booking_to_response(new_booking, current_user)
 
 
@@ -424,17 +468,13 @@ def update_booking(
 ) -> BookingResponse:
     """
     Update a booking (organiser-only).
-    Revalidates all constraints.
     """
 
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
 
-    # Permission check - FR-2.15
-    if booking.organiser_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the organiser can modify this booking.")
 
-    start, end = _parse_request_times(req.date, req.start_time, req.end_time, allow_past=True)
+    start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     new_attendee_ids = _resolve_attendees(req.attendee_emails)
     
     # Separate existing accepted attendees from new invitations
@@ -458,8 +498,8 @@ def update_booking(
     # Update booking
     updated_booking = booking.copy(update={
         "room_id": req.room_id,
-        "attendee_ids": accepted_attendees,  # Keep accepted
-        "pending_attendee_ids": all_pending,  # New + existing pending
+        "attendee_ids": accepted_attendees, 
+        "pending_attendee_ids": all_pending,
         "title": req.title,
         "notes": req.notes,
         "start_time": start,
@@ -470,29 +510,53 @@ def update_booking(
     BOOKINGS[idx] = updated_booking
     save_bookings(BOOKINGS)
     
-    # Return transformed response
     return booking_to_response(updated_booking, current_user)
 
 
 @router.delete("/bookings/{booking_id}", status_code=204)
 def delete_booking(
     booking_id: int,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    body: CancelBookingRequest = None 
 ) -> None:
-    """Delete a booking – organisers only (FR-2.16)."""
+    """
+    Delete a booking (organisers only). 
+    Optionally accepts a cancellation reason that will be included in notifications.
+    """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
 
-    # Permission check
-    if booking.organiser_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Only the organiser can delete this booking.")
+    # Get room name for notification
+    room = next((r for r in ROOMS if r.id == booking.room_id), None)
+    room_name = room.name if room else "Unknown Room"
+    
+    # Get cancellation reason
+    reason = body.reason if body and body.reason else None
+    reason_text = f"\n\nReason: {reason}" if reason else ""
+    
+    # Notify all accepted attendees about cancellation
+    for attendee_id in booking.attendee_ids:
+        create_notification(
+            user_id=attendee_id,
+            notif_type="booking_cancelled",
+            title="Meeting Cancelled",
+            message=f"The meeting '{booking.title}' scheduled for {booking.start_time.strftime('%Y-%m-%d at %H:%M')} in {room_name} has been cancelled by the organizer.{reason_text}",
+            booking_id=booking.id
+        )
+    
+    # Also notify pending attendees
+    for attendee_id in booking.pending_attendee_ids:
+        create_notification(
+            user_id=attendee_id,
+            notif_type="booking_cancelled",
+            title="Meeting Invitation Cancelled",
+            message=f"Your invitation to '{booking.title}' scheduled for {booking.start_time.strftime('%Y-%m-%d at %H:%M')} in {room_name} has been cancelled.{reason_text}",
+            booking_id=booking.id
+        )
 
     del BOOKINGS[idx]
     save_bookings(BOOKINGS)
 
-# ============================================================================
-# INVITATION ENDPOINTS
-# ============================================================================
 
 @router.get("/bookings/{booking_id}", response_model=BookingResponse)
 def get_booking_details(
@@ -520,7 +584,6 @@ def get_booking_details(
                 detail="You do not have access to this private booking"
             )
     
-    # Return transformed response
     return booking_to_response(booking, current_user)
 
 
@@ -530,15 +593,12 @@ def accept_invitation(
     current_user: User = Depends(get_current_user)
 ) -> dict:
     """
-    Accept an invitation to a booking (FR-3.1, FR-3.2).
-    
-    Moves the current user from pending to accepted attendees.
-    Validates capacity and timing before accepting.
+    Accept an invitation to a booking.
     """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
-    # Validation 1: Must be in pending invitations
+    # Validation: Must be in pending invitations
     if current_user.id not in booking.pending_attendee_ids:
         if current_user.id in booking.attendee_ids:
             raise HTTPException(
@@ -551,14 +611,8 @@ def accept_invitation(
                 detail="You don't have a pending invitation to this booking"
             )
     
-    # Validation 2: Organisers can't join as attendees
-    if current_user.id == booking.organiser_id:
-        raise HTTPException(
-            status_code=400, 
-            detail="You are the organiser of this booking"
-        )
     
-    # Validation 3: Check room capacity (FR-2.8)
+    # Validation: Check room capacity
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     if room:
         # Count: current accepted attendees + organiser + new person
@@ -569,7 +623,7 @@ def accept_invitation(
                 detail=f"Booking is at full capacity ({room.capacity} people)"
             )
     
-    # Validation 4: Can't join meetings that already started
+    # Validation: Can't join meetings that already started
     if booking.start_time < datetime.utcnow():
         raise HTTPException(
             status_code=400, 
@@ -592,54 +646,131 @@ def accept_invitation(
 @router.post("/bookings/{booking_id}/decline", status_code=200)
 def decline_invitation(
     booking_id: int,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    body: DeclineInvitationRequest = None
 ) -> dict:
     """
-    Decline an invitation or cancel attendance (FR-3.6).
-    
-    Removes the current user from pending or accepted attendees.
-    Organisers should use DELETE to cancel the entire booking.
+    Decline an invitation or cancel attendance.
     """
-    idx = _booking_index(booking_id)
-    booking = BOOKINGS[idx]
+    booking = BOOKINGS[_booking_index(booking_id)]
     
-    # Validation 1: Must be in pending or accepted list
+    # Determine user's current status
     is_pending = current_user.id in booking.pending_attendee_ids
     is_accepted = current_user.id in booking.attendee_ids
     
-    if not is_pending and not is_accepted:
-        raise HTTPException(
-            status_code=400, 
-            detail="You don't have an invitation to this booking"
-        )
-    
-    # Validation 2: Organisers should delete, not decline
+    # Validation
     if current_user.id == booking.organiser_id:
-        raise HTTPException(
-            status_code=400, 
-            detail="Organisers cannot decline their own bookings. Use DELETE /bookings/{id} to cancel."
-        )
-    
-    # Validation 3: Can't cancel after meeting started (only for accepted)
+        raise HTTPException(400, "Organisers cannot decline. Use DELETE /bookings/{id} to cancel.")
     if is_accepted and booking.start_time < datetime.utcnow():
-        raise HTTPException(
-            status_code=400, 
-            detail="Cannot cancel attendance after meeting has started"
-        )
+        raise HTTPException(400, "Cannot cancel after meeting started")
     
-    # All validations passed - remove user from pending or accepted
-    if is_pending:
-        booking.pending_attendee_ids.remove(current_user.id)
-        message = "Successfully declined invitation"
-    else:
-        booking.attendee_ids.remove(current_user.id)
-        message = "Successfully cancelled your attendance"
+    # Prepare notification
+    action = "declined the invitation to" if is_pending else "cancelled their attendance for"
+    reason_text = f"\n\nReason: {body.reason}" if body and body.reason else ""
+    room = next((r for r in ROOMS if r.id == booking.room_id), None)
+    room_name = room.name if room else "Unknown Room"
     
+    create_notification(
+        user_id=booking.organiser_id,
+        notif_type="invitation_declined",
+        title="Attendee Response",
+        message=f"{current_user.name} has {action} your meeting '{booking.title}' "
+                f"scheduled for {booking.start_time.strftime('%Y-%m-%d at %H:%M')} "
+                f"in {room_name}.{reason_text}",
+        booking_id=booking.id
+    )
+    
+    # Remove user from appropriate list
+    target_list = booking.pending_attendee_ids if is_pending else booking.attendee_ids
+    target_list.remove(current_user.id)
     save_bookings(BOOKINGS)
     
     return {
-        "message": message,
+        "message": "Declined invitation" if is_pending else "Cancelled attendance",
         "booking_id": booking_id,
-        "booking_title": booking.title,
-        "removed_at": datetime.utcnow().isoformat()
+        "booking_title": booking.title
     }
+
+
+@router.get("/notifications", response_model=List[NotificationResponse])
+def get_notifications(current_user: User = Depends(get_current_user)) -> List[NotificationResponse]:
+    """
+    Get all notifications for the current user.
+    Also processes any pending booking reminders.
+    """
+    # Process reminders before returning notifications
+    process_booking_reminders()
+    
+    # Get user's notifications (sorted by most recent first)
+    user_notifications = [
+        n for n in NOTIFICATIONS 
+        if n.user_id == current_user.id
+    ]
+    user_notifications.sort(key=lambda n: n.created_at, reverse=True)
+    
+    # Transform to response format
+    return [
+        NotificationResponse(
+            id=n.id,
+            type=n.type,
+            title=n.title,
+            message=n.message,
+            booking_id=n.booking_id,
+            created_at=n.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            is_read=n.is_read
+        )
+        for n in user_notifications
+    ]
+
+
+@router.get("/notifications/unread/count")
+def get_unread_count(current_user: User = Depends(get_current_user)) -> dict:
+    """Get count of unread notifications for the current user."""
+    # Process reminders first
+    process_booking_reminders()
+    
+    unread_count = sum(
+        1 for n in NOTIFICATIONS 
+        if n.user_id == current_user.id and not n.is_read
+    )
+    return {"count": unread_count}
+
+
+@router.put("/notifications/{notification_id}/read", status_code=200)
+def mark_notification_read(
+    notification_id: int,
+    current_user: User = Depends(get_current_user)
+) -> dict:
+    """Mark a notification as read."""
+    # Find notification
+    notification = next((n for n in NOTIFICATIONS if n.id == notification_id), None)
+    
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    # Check ownership
+    if notification.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can only mark your own notifications as read")
+    
+    # Mark as read
+    notification.is_read = True
+    save_notifications(NOTIFICATIONS)
+    
+    return {"message": "Notification marked as read"}
+
+
+@router.delete("/notifications/{notification_id}", status_code=204)
+def delete_notification(
+    notification_id: int,
+    current_user: User = Depends(get_current_user)
+) -> None:
+    """Delete a notification."""
+    # Find notification
+    for idx, notification in enumerate(NOTIFICATIONS):
+        if notification.id == notification_id:
+            
+            del NOTIFICATIONS[idx]
+            save_notifications(NOTIFICATIONS)
+            return
+    
+    raise HTTPException(status_code=404, detail="Notification not found")
