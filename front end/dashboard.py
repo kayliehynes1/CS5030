@@ -5,6 +5,66 @@ from datetime import datetime
 class Dashboard:
     def __init__(self, app):
         self.app = app
+        self.room_data = []  # Initialize room data
+        self.current_bookings = {}  # Initialize current bookings for reference
+
+    def _validate_datetime_inputs(self, date: str, start_time: str, end_time: str) -> bool:
+        """Shared validation for date/time fields used by create and edit flows."""
+        if not date:
+            messagebox.showerror("Error", "Please enter a date")
+            return False
+        if not start_time:
+            messagebox.showerror("Error", "Please enter a start time")
+            return False
+        if not end_time:
+            messagebox.showerror("Error", "Please enter an end time")
+            return False
+
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror("Error", "Date must be in format YYYY-MM-DD (e.g., 2025-01-15)")
+            return False
+
+        try:
+            datetime.strptime(start_time, "%H:%M")
+            datetime.strptime(end_time, "%H:%M")
+        except ValueError:
+            messagebox.showerror("Error", "Time must be in format HH:MM (e.g., 09:00)")
+            return False
+
+        return True
+
+    def _load_available_rooms(self, date: str, start_time: str, end_time: str, listbox: tk.Listbox, store_attr: str) -> list:
+        """Fetch available rooms and populate a given listbox, storing results on the instance."""
+        try:
+            rooms = self.app.api_client.get_available_rooms(date, start_time, end_time)
+            setattr(self, store_attr, rooms or [])
+            listbox.delete(0, tk.END)
+
+            if rooms:
+                for room in rooms:
+                    room_info = f"{room['name']} | Cap: {room['capacity']} | Facilities: {', '.join(room.get('facilities', []))}"
+                    listbox.insert(tk.END, room_info)
+            else:
+                listbox.insert(tk.END, "No rooms available for selected time")
+            return rooms
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to check room availability:\n\n{str(e)}")
+            return []
+
+    def _validate_booking_fields(self, title: str, date: str, selected_room) -> bool:
+        """Shared form validation for create/edit flows."""
+        if not title:
+            messagebox.showerror("Error", "Please enter a meeting title")
+            return False
+        if not date:
+            messagebox.showerror("Error", "Please select a date")
+            return False
+        if not selected_room:
+            messagebox.showerror("Error", "Please select a room")
+            return False
+        return True
     
     def show_dashboard(self):
         """Main dashboard"""
@@ -29,9 +89,9 @@ class Dashboard:
         
         # Navigation buttons
         nav_buttons = [
-            ("Dashboard", self.show_upcoming_bookings),
+            ("Dashboard", self.show_dashboard_view),
             ("Create Booking", self.show_create_booking),
-            ("My Bookings", self.show_my_bookings),
+            ("Manage Bookings", self.show_manage_bookings),
             ("Available Rooms", self.show_room_browser),
             ("Profile", self.show_profile)
         ]
@@ -45,7 +105,7 @@ class Dashboard:
         self.content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
         
         # Show default view
-        self.show_upcoming_bookings()
+        self.show_dashboard_view()
     
     def clear_content(self):
         """Clearing content area"""
@@ -53,15 +113,31 @@ class Dashboard:
             for widget in self.content_frame.winfo_children():
                 widget.destroy()
     
-    def show_upcoming_bookings(self):
-        """Show upcoming bookings """
+    def show_dashboard_view(self):
+        """Show dashboard with upcoming and past bookings"""
         self.clear_content()
         
+        # Create notebook for upcoming vs past
+        notebook = ttk.Notebook(self.content_frame)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Upcoming bookings tab
+        upcoming_frame = ttk.Frame(notebook)
+        notebook.add(upcoming_frame, text="📅 Upcoming Bookings")
+        self._show_upcoming_bookings_content(upcoming_frame)
+        
+        # Past bookings tab
+        past_frame = ttk.Frame(notebook)
+        notebook.add(past_frame, text="📋 Past Bookings")
+        self._show_past_bookings_content(past_frame)
+    
+    def _show_upcoming_bookings_content(self, parent):
+        """Show upcoming bookings content"""
         try:
             bookings = self.app.api_client.get_upcoming_bookings()
             
             if not bookings:
-                no_bookings_frame = ttk.Frame(self.content_frame)
+                no_bookings_frame = ttk.Frame(parent)
                 no_bookings_frame.pack(expand=True)
                 
                 ttk.Label(no_bookings_frame, text="No upcoming bookings", 
@@ -70,42 +146,57 @@ class Dashboard:
                           command=self.show_create_booking).pack(pady=10)
                 return
             
-            # Create notebook for different views
-            notebook = ttk.Notebook(self.content_frame)
-            notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            # Organized bookings
-            org_frame = ttk.Frame(notebook)
-            notebook.add(org_frame, text="📋 My Organized Bookings")
-            self._display_bookings_table(org_frame, 
-                                       [b for b in bookings if b.get('is_organizer')],
-                                       show_actions=True)
-            
-            # Attending bookings
-            att_frame = ttk.Frame(notebook)
-            notebook.add(att_frame, text="Bookings I'm Attending")
-            self._display_bookings_table(att_frame, 
-                                       [b for b in bookings if not b.get('is_organizer')],
-                                       show_actions=False)
+            # Display all bookings in a single table
+            self._display_bookings_table(parent, bookings, action_type='mixed')
             
         except Exception as e:
-            self._show_error("Unable to load bookings")
+            self._show_error_in_frame(parent, "Unable to load upcoming bookings")
     
-    def _display_bookings_table(self, parent, bookings, show_actions=False):
-        """Display bookings in a table format"""
+    def _show_past_bookings_content(self, parent):
+        """Show past bookings content"""
+        try:
+            bookings = self.app.api_client.get_past_bookings()
+            
+            if not bookings:
+                ttk.Label(parent, text="No past bookings", 
+                         font=('Arial', 14)).pack(expand=True, pady=50)
+                return
+            
+            # Display all bookings in a single table
+            self._display_bookings_table(parent, bookings, action_type='past')
+            
+        except Exception as e:
+            self._show_error_in_frame(parent, "Unable to load past bookings")
+    
+    def _display_bookings_table(self, parent, bookings, action_type='none'):
+        """
+        Display bookings in a table format
+        action_type: 'organizer', 'pending', 'accepted', 'mixed', 'past', or 'none'
+        """
         if not bookings:
             ttk.Label(parent, text="No bookings found").pack(pady=50)
             return
         
+        # Create main container
+        container = ttk.Frame(parent)
+        container.pack(fill=tk.BOTH, expand=True)
+        
+        # Create treeview frame
+        tree_frame = ttk.Frame(container)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        
         # Create treeview
         columns = ('Title', 'Room', 'Date', 'Time', 'Attendees', 'Status')
-        tree = ttk.Treeview(parent, columns=columns, show='headings', height=12)
+        tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=12)
         
         # Define headings
         column_widths = {'Title': 150, 'Room': 120, 'Date': 100, 'Time': 120, 'Attendees': 100, 'Status': 100}
         for col in columns:
             tree.heading(col, text=col)
             tree.column(col, width=column_widths[col])
+        
+        # Store bookings data for later reference
+        self.current_bookings = {str(b.get('id')): b for b in bookings}
         
         # Add data
         for booking in bookings:
@@ -119,15 +210,64 @@ class Dashboard:
             ), tags=(str(booking.get('id')),))
         
         # Add scrollbar
-        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
         tree.configure(yscrollcommand=scrollbar.set)
         
         tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        # Double-click to view details
-        if show_actions:
+        # Add action buttons based on type
+        if action_type == 'organizer':
+            # Double-click to view details for organizers
             tree.bind('<Double-1>', lambda e: self._on_booking_select(tree))
+            
+        elif action_type == 'pending':
+            # Add action buttons for pending invitations
+            action_frame = ttk.Frame(container)
+            action_frame.pack(fill=tk.X, pady=10, padx=10)
+            
+            ttk.Label(action_frame, text="Select an invitation and:", 
+                     font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="View Details", 
+                      command=lambda: self._view_attendee_booking(tree)).pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="Accept", 
+                      command=lambda: self._accept_invitation(tree),
+                      bootstyle="success").pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="Decline", 
+                      command=lambda: self._decline_booking(tree),
+                      bootstyle="danger").pack(side=tk.LEFT, padx=5)
+            
+        elif action_type == 'accepted':
+            # Add action buttons for accepted bookings
+            action_frame = ttk.Frame(container)
+            action_frame.pack(fill=tk.X, pady=10, padx=10)
+            
+            ttk.Label(action_frame, text="Select a booking and:", 
+                     font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="View Details", 
+                      command=lambda: self._view_attendee_booking(tree)).pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="Leave Booking", 
+                      command=lambda: self._decline_booking(tree),
+                      bootstyle="danger").pack(side=tk.LEFT, padx=5)
+        
+        elif action_type == 'mixed' or action_type == 'past':
+            # For mixed or past bookings, just allow double-click to view
+            tree.bind('<Double-1>', lambda e: self._on_booking_select(tree))
+            
+            # Add view details button
+            action_frame = ttk.Frame(container)
+            action_frame.pack(fill=tk.X, pady=10, padx=10)
+            
+            ttk.Label(action_frame, text="Double-click a booking or:", 
+                     font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+            
+            ttk.Button(action_frame, text="View Details", 
+                      command=lambda: self._on_booking_select(tree)).pack(side=tk.LEFT, padx=5)
     
     def _on_booking_select(self, tree):
         """Handle booking selection"""
@@ -137,8 +277,186 @@ class Dashboard:
             self.show_booking_details(booking_id)
     
     def show_booking_details(self, booking_id):
-        """Show booking details"""
-        messagebox.showinfo("Booking Details", f"Details for booking {booking_id}\n\nThis would show full booking information with edit options.")
+        """Show detailed booking information with management options"""
+        try:
+            # Fetch full booking details from API
+            booking = self.app.api_client.get_booking(int(booking_id))
+            
+            # Create a new window for booking details
+            details_window = tk.Toplevel(self.app.root)
+            details_window.title(f"Booking Details - {booking.get('title', 'N/A')}")
+            details_window.geometry("600x500")
+            details_window.grab_set()  # Modal window
+            
+            # Main frame
+            main_frame = ttk.Frame(details_window, padding="20")
+            main_frame.pack(fill=tk.BOTH, expand=True)
+            
+            # Title
+            ttk.Label(main_frame, text=booking.get('title', 'N/A'), 
+                     font=('Arial', 16, 'bold')).pack(pady=(0, 20))
+            
+            # Details frame with grid layout
+            details_frame = ttk.Frame(main_frame)
+            details_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+            
+            # Booking information
+            info = [
+                ("Room:", booking.get('room_name', 'N/A')),
+                ("Date:", booking.get('date', 'N/A')),
+                ("Start Time:", booking.get('start_time', 'N/A')),
+                ("End Time:", booking.get('end_time', 'N/A')),
+                ("Attendees:", f"{booking.get('current_attendees', 0)}/{booking.get('capacity', 0)}"),
+                ("Status:", booking.get('status', 'Confirmed')),
+            ]
+            
+            for i, (label, value) in enumerate(info):
+                ttk.Label(details_frame, text=label, 
+                         font=('Arial', 10, 'bold')).grid(row=i, column=0, sticky=tk.W, pady=5, padx=(0, 10))
+                ttk.Label(details_frame, text=value, 
+                         font=('Arial', 10)).grid(row=i, column=1, sticky=tk.W, pady=5)
+            
+            # Attendee emails section
+            attendee_emails = booking.get('attendee_emails', [])
+            if attendee_emails:
+                row_offset = len(info)
+                ttk.Label(details_frame, text="Invited:", 
+                         font=('Arial', 10, 'bold')).grid(row=row_offset, column=0, sticky=tk.NW, pady=5, padx=(0, 10))
+                
+                # Display emails as comma-separated list with wrapping
+                emails_text = ", ".join(attendee_emails)
+                emails_label = ttk.Label(details_frame, text=emails_text, 
+                                        font=('Arial', 10), wraplength=350)
+                emails_label.grid(row=row_offset, column=1, sticky=tk.W, pady=5)
+            
+            # Notes section
+            if booking.get('notes'):
+                ttk.Label(main_frame, text="Notes:", 
+                         font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(10, 5))
+                
+                notes_frame = ttk.Frame(main_frame, relief='solid', borderwidth=1)
+                notes_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 20))
+                
+                notes_text = tk.Text(notes_frame, height=5, wrap=tk.WORD, 
+                                    font=('Arial', 10), state='disabled')
+                notes_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                notes_text.config(state='normal')
+                notes_text.insert('1.0', booking.get('notes', ''))
+                notes_text.config(state='disabled')
+            
+            # Action buttons (only if organizer)
+            if booking.get('is_organizer'):
+                button_frame = ttk.Frame(main_frame)
+                button_frame.pack(fill=tk.X, pady=(10, 0))
+                
+                ttk.Button(button_frame, text="Edit Booking", 
+                          command=lambda: [details_window.destroy(), self.edit_booking(booking)]).pack(side=tk.LEFT, padx=5)
+                
+                ttk.Button(button_frame, text="Cancel Booking", 
+                          command=lambda: [details_window.destroy(), self.cancel_booking(booking)],
+                          bootstyle="danger").pack(side=tk.LEFT, padx=5)
+                
+                ttk.Button(button_frame, text="Close", 
+                          command=details_window.destroy).pack(side=tk.RIGHT, padx=5)
+            else:
+                ttk.Button(main_frame, text="Close", 
+                          command=details_window.destroy).pack(pady=(10, 0))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to load booking details: {str(e)}")
+    
+    def _view_attendee_booking(self, tree):
+        """View details of a booking as attendee"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a booking to view")
+            return
+        
+        booking_id = tree.item(selection[0], "tags")[0]
+        
+        try:
+            # Fetch full booking details from API
+            booking = self.app.api_client.get_booking(int(booking_id))
+            
+            # Create info message with booking details
+            info = f"""
+Booking Details
+
+Title: {booking.get('title', 'N/A')}
+Room: {booking.get('room_name', 'N/A')}
+Date: {booking.get('date', 'N/A')}
+Time: {booking.get('start_time', 'N/A')} - {booking.get('end_time', 'N/A')}
+Attendees: {booking.get('current_attendees', 0)}/{booking.get('capacity', 0)}
+Status: {booking.get('status', 'Confirmed')}
+
+Notes: {booking.get('notes', 'None')}
+"""
+            messagebox.showinfo("Booking Details", info.strip())
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to load booking details: {str(e)}")
+    
+    def _decline_booking(self, tree):
+        """Decline/leave a booking as attendee"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a booking to leave")
+            return
+        
+        booking_id = tree.item(selection[0], "tags")[0]
+        
+        # Get booking info from stored data
+        booking = self.current_bookings.get(booking_id, {})
+        booking_title = booking.get('title', 'this booking')
+        
+        # Confirm action
+        if not messagebox.askyesno("Confirm", 
+                                   f"Are you sure you want to leave '{booking_title}'?\n\n"
+                                   "You will no longer be registered for this meeting."):
+            return
+        
+        try:
+            # Call API to decline invitation
+            response = self.app.api_client.decline_invitation(int(booking_id))
+            
+            if response:
+                messagebox.showinfo("Success", 
+                                  f"You have successfully left '{booking_title}'")
+                # Refresh the bookings view
+                self.show_dashboard_view()
+            else:
+                messagebox.showerror("Error", "Failed to leave booking")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to leave booking: {str(e)}")
+    
+    def _accept_invitation(self, tree):
+        """Accept a pending invitation"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select an invitation to accept")
+            return
+        
+        booking_id = tree.item(selection[0], "tags")[0]
+        
+        # Get booking info from stored data
+        booking = self.current_bookings.get(booking_id, {})
+        booking_title = booking.get('title', 'this booking')
+        
+        try:
+            # Call API to accept invitation
+            response = self.app.api_client.accept_invitation(int(booking_id))
+            
+            if response:
+                messagebox.showinfo("Success", 
+                                  f"You have accepted the invitation to '{booking_title}'")
+                # Refresh the bookings view
+                self.show_dashboard_view()
+            else:
+                messagebox.showerror("Error", "Failed to accept invitation")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to accept invitation: {str(e)}")
     
     def show_create_booking(self):
         """Show booking creation form"""
@@ -216,60 +534,34 @@ class Dashboard:
     
     def check_availability(self):
         """Check room availability based on form inputs"""
-        date = self.form_widgets['date'].get()
-        start_time = self.form_widgets['start_time'].get()
-        end_time = self.form_widgets['end_time'].get()
-        
-        if not date:
-            messagebox.showerror("Error", "Please enter a date")
+        date = self.form_widgets['date'].get().strip()
+        start_time = self.form_widgets['start_time'].get().strip()
+        end_time = self.form_widgets['end_time'].get().strip()
+        if not self._validate_datetime_inputs(date, start_time, end_time):
             return
-        
-        try:
-            rooms = self.app.api_client.get_available_rooms(date, start_time, end_time)
-            self.room_listbox.delete(0, tk.END)
-            
-            if rooms:
-                for room in rooms:
-                    room_info = f"{room['name']} | Cap: {room['capacity']} | Facilities: {', '.join(room.get('facilities', []))}"
-                    self.room_listbox.insert(tk.END, room_info)
-                    # Store room ID in listbox item data
-                    self.room_listbox.room_data = rooms
-            else:
-                self.room_listbox.insert(tk.END, "No rooms available for selected time")
-                
-        except Exception as e:
-            messagebox.showerror("Error", "Unable to check room availability")
+        self._load_available_rooms(date, start_time, end_time, self.room_listbox, "room_data")
     
     def get_selected_room(self):
         """Get selected room data"""
         selection = self.room_listbox.curselection()
-        if selection and hasattr(self.room_listbox, 'room_data'):
-            return self.room_listbox.room_data[selection[0]]
+        if selection and hasattr(self, 'room_data'):
+            return self.room_data[selection[0]]
         return None
     
     def create_booking(self):
         """Create new booking"""
         # Get form data
         title = self.form_widgets['title'].get().strip()
-        date = self.form_widgets['date'].get()
-        start_time = self.form_widgets['start_time'].get()
-        end_time = self.form_widgets['end_time'].get()
-        notes = self.form_widgets['notes'].get("1.0", tk.END).strip() if hasattr(self.form_widgets['notes'], 'get') else self.form_widgets['notes'].get()
+        date = self.form_widgets['date'].get().strip()
+        start_time = self.form_widgets['start_time'].get().strip()
+        end_time = self.form_widgets['end_time'].get().strip()
+        notes = self.form_widgets['notes'].get("1.0", tk.END).strip()  # Text widget always uses this
         
         selected_room = self.get_selected_room()
         attendee_emails = [email.strip() for email in self.attendees_entry.get().split(",") if email.strip()]
         
         # Validation
-        if not title:
-            messagebox.showerror("Error", "Please enter a meeting title")
-            return
-        
-        if not date:
-            messagebox.showerror("Error", "Please select a date")
-            return
-        
-        if not selected_room:
-            messagebox.showerror("Error", "Please select a room")
+        if not self._validate_booking_fields(title, date, selected_room):
             return
         
         try:
@@ -287,39 +579,104 @@ class Dashboard:
             
             if response:
                 messagebox.showinfo("Success", "Booking created successfully!")
-                self.show_upcoming_bookings()
+                self.show_dashboard_view()
             else:
                 messagebox.showerror("Error", "Failed to create booking")
                 
         except Exception as e:
             messagebox.showerror("Error", f"Unable to create booking: {str(e)}")
     
-    def show_my_bookings(self):
-        """Show user's organized bookings for management"""
+    def show_manage_bookings(self):
+        """Show manage bookings view with organized and invited tabs"""
         self.clear_content()
         
+        # Create notebook for organized vs invited
+        notebook = ttk.Notebook(self.content_frame)
+        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Organized meetings tab
+        organized_frame = ttk.Frame(notebook)
+        notebook.add(organized_frame, text="📋 Organized Meetings")
+        self._show_organized_meetings_content(organized_frame)
+        
+        # Invited meetings tab
+        invited_frame = ttk.Frame(notebook)
+        notebook.add(invited_frame, text="📬 Invited Meetings")
+        self._show_invited_meetings_content(invited_frame)
+    
+    def _show_organized_meetings_content(self, parent):
+        """Show organized meetings content with management options"""
         try:
             bookings = self.app.api_client.get_organized_bookings()
             
             if not bookings:
-                ttk.Label(self.content_frame, text="You haven't organized any bookings", 
-                         font=('Arial', 12)).pack(pady=50)
+                ttk.Label(parent, text="You haven't organized any bookings", 
+                         font=('Arial', 12)).pack(expand=True, pady=50)
                 return
             
-            # Header
-            ttk.Label(self.content_frame, text="Manage My Bookings", 
-                     font=('Arial', 16, 'bold')).pack(pady=(0, 20))
+            # Display bookings as cards
+            # Create a scrollable frame
+            canvas = tk.Canvas(parent)
+            scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+            scrollable_frame = ttk.Frame(canvas)
             
-            # Bookings list
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+            canvas.configure(yscrollcommand=scrollbar.set)
+            
+            # Pack canvas and scrollbar
+            canvas.pack(side="left", fill="both", expand=True)
+            scrollbar.pack(side="right", fill="y")
+            
+            # Create booking cards
             for booking in bookings:
-                self._create_booking_card(booking)
+                self._create_booking_card(scrollable_frame, booking)
                 
         except Exception as e:
-            self._show_error("Unable to load bookings")
+            self._show_error_in_frame(parent, "Unable to load organized bookings")
     
-    def _create_booking_card(self, booking):
+    def _show_invited_meetings_content(self, parent):
+        """Show invited meetings content (pending and accepted)"""
+        try:
+            # Get all upcoming bookings and filter for invited ones
+            all_bookings = self.app.api_client.get_upcoming_bookings()
+            
+            # Filter for bookings where user is invited (not organizer)
+            invited_bookings = [b for b in all_bookings if not b.get('is_organizer')]
+            
+            if not invited_bookings:
+                ttk.Label(parent, text="You don't have any invitations", 
+                         font=('Arial', 12)).pack(expand=True, pady=50)
+                return
+            
+            # Separate pending and accepted
+            pending = [b for b in invited_bookings if b.get('invitation_status') == 'pending']
+            accepted = [b for b in invited_bookings if b.get('invitation_status') == 'accepted']
+            
+            # Create sub-notebook for pending vs accepted
+            sub_notebook = ttk.Notebook(parent)
+            sub_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            # Pending invitations sub-tab
+            pending_frame = ttk.Frame(sub_notebook)
+            sub_notebook.add(pending_frame, text="⏳ Pending Invitations")
+            self._display_bookings_table(pending_frame, pending, action_type='pending')
+            
+            # Accepted bookings sub-tab
+            accepted_frame = ttk.Frame(sub_notebook)
+            sub_notebook.add(accepted_frame, text="✓ Accepted")
+            self._display_bookings_table(accepted_frame, accepted, action_type='accepted')
+            
+        except Exception as e:
+            self._show_error_in_frame(parent, "Unable to load invited meetings")
+    
+    def _create_booking_card(self, parent, booking):
         """Create a booking card with management options"""
-        card_frame = ttk.LabelFrame(self.content_frame, text=booking['title'], padding="10")
+        card_frame = ttk.LabelFrame(parent, text=booking['title'], padding="10")
         card_frame.pack(fill=tk.X, pady=5, padx=10)
         
         # Booking info
@@ -346,7 +703,115 @@ class Dashboard:
     
     def edit_booking(self, booking):
         """Edit existing booking"""
-        messagebox.showinfo("Edit Booking", f"Edit booking: {booking['title']}\n\nThis would open an edit form similar to create booking.")
+        self.clear_content()
+        
+        form_frame = ttk.Frame(self.content_frame)
+        form_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        # Title
+        ttk.Label(form_frame, text=f"Edit Booking: {booking.get('title', '')}", 
+                 font=('Arial', 16, 'bold')).grid(row=0, column=0, columnspan=2, pady=(0, 20))
+        
+        # Form fields
+        fields = [
+            ("Meeting Title *", "title", "entry"),
+            ("Date * (YYYY-MM-DD)", "date", "entry"),
+            ("Start Time (HH:MM)", "start_time", "entry"), 
+            ("End Time (HH:MM)", "end_time", "entry"),
+            ("Additional Notes", "notes", "text")
+        ]
+        
+        self.edit_form_widgets = {}
+        self.editing_booking_id = booking.get('id')
+        
+        for i, (label, field, widget_type) in enumerate(fields):
+            ttk.Label(form_frame, text=label).grid(row=i+1, column=0, sticky=tk.W, pady=8)
+            
+            if widget_type == "entry":
+                widget = ttk.Entry(form_frame, width=40)
+                widget.grid(row=i+1, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
+                
+                # Pre-fill with existing data
+                if field == "title":
+                    widget.insert(0, booking.get('title', ''))
+                elif field == "date":
+                    widget.insert(0, booking.get('date', ''))
+                elif field == "start_time":
+                    widget.insert(0, booking.get('start_time', ''))
+                elif field == "end_time":
+                    widget.insert(0, booking.get('end_time', ''))
+                    
+            elif widget_type == "text":
+                widget = tk.Text(form_frame, width=40, height=4)
+                widget.grid(row=i+1, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
+                # Pre-fill notes
+                if booking.get('notes'):
+                    widget.insert('1.0', booking.get('notes'))
+            
+            self.edit_form_widgets[field] = widget
+        
+        # Room selection (read-only display of current room)
+        ttk.Label(form_frame, text="Current Room:").grid(row=len(fields)+1, column=0, sticky=tk.W, pady=8)
+        ttk.Label(form_frame, text=booking.get('room_name', 'N/A'),
+                 font=('Arial', 10, 'bold')).grid(row=len(fields)+1, column=1, sticky=tk.W, pady=8, padx=(10, 0))
+        
+        # Check availability for new time slot
+        ttk.Label(form_frame, text="Select New Room:").grid(row=len(fields)+2, column=0, sticky=tk.W, pady=8)
+        
+        room_frame = ttk.Frame(form_frame)
+        room_frame.grid(row=len(fields)+2, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
+        
+        self.edit_room_listbox = tk.Listbox(room_frame, width=50, height=6)
+        room_scrollbar = ttk.Scrollbar(room_frame, orient=tk.VERTICAL, command=self.edit_room_listbox.yview)
+        self.edit_room_listbox.configure(yscrollcommand=room_scrollbar.set)
+        
+        self.edit_room_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        room_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Pre-select current room (will be populated after checking availability)
+        self.current_room_id = booking.get('room_id')  # Store for later comparison
+        
+        # Check availability button
+        ttk.Button(form_frame, text="Check Available Rooms", 
+                  command=self.check_availability_for_edit).grid(row=len(fields)+3, column=0, columnspan=2, pady=10)
+        
+        # Current attendees display
+        current_attendees = booking.get('attendee_emails', [])
+        if current_attendees:
+            ttk.Label(form_frame, text="Current Attendees:", 
+                     font=('Arial', 10, 'bold')).grid(row=len(fields)+4, column=0, sticky=tk.W, pady=8)
+            attendees_text = ", ".join(current_attendees)
+            ttk.Label(form_frame, text=attendees_text, 
+                     font=('Arial', 9), foreground='gray', wraplength=350).grid(
+                row=len(fields)+4, column=1, sticky=tk.W, pady=8, padx=(10, 0))
+            row_offset = len(fields) + 5
+        else:
+            row_offset = len(fields) + 4
+        
+        # Add additional attendees field
+        ttk.Label(form_frame, text="Add Attendees (emails, comma separated):").grid(
+            row=row_offset, column=0, sticky=tk.W, pady=8)
+        self.edit_attendees_entry = ttk.Entry(form_frame, width=40)
+        self.edit_attendees_entry.grid(row=row_offset, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
+        
+        # Store current attendees for later
+        self.current_attendee_emails = current_attendees
+        
+        # Action buttons
+        button_frame = ttk.Frame(form_frame)
+        button_frame.grid(row=row_offset+1, column=0, columnspan=2, pady=20)
+        
+        ttk.Button(button_frame, text="Save Changes", 
+                  command=self.save_booking_edits).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(button_frame, text="Cancel", 
+                  command=self.show_manage_bookings).pack(side=tk.LEFT, padx=5)
+        
+        # Configure grid weights
+        form_frame.columnconfigure(1, weight=1)
+        
+        # Auto-check availability with current date/time
+        self.check_availability_for_edit()
     
     def cancel_booking(self, booking):
         """Cancel a booking"""
@@ -356,11 +821,85 @@ class Dashboard:
                 success = self.app.api_client.cancel_booking(booking['id'])
                 if success:
                     messagebox.showinfo("Success", "Booking cancelled successfully")
-                    self.show_my_bookings()
+                    self.show_manage_bookings()
                 else:
                     messagebox.showerror("Error", "Failed to cancel booking")
             except Exception as e:
                 messagebox.showerror("Error", f"Unable to cancel booking: {str(e)}")
+    
+    def check_availability_for_edit(self):
+        """Check room availability for editing (similar to check_availability but for edit form)"""
+        if not hasattr(self, 'edit_form_widgets'):
+            return
+            
+        date = self.edit_form_widgets['date'].get().strip()
+        start_time = self.edit_form_widgets['start_time'].get().strip()
+        end_time = self.edit_form_widgets['end_time'].get().strip()
+        
+        if not self._validate_datetime_inputs(date, start_time, end_time):
+            return
+
+        rooms = self._load_available_rooms(date, start_time, end_time, self.edit_room_listbox, "edit_room_data")
+
+        # Pre-select current room if it's available
+        if rooms:
+            for i, room in enumerate(rooms):
+                if room['id'] == self.current_room_id:
+                    self.edit_room_listbox.selection_set(i)
+                    self.edit_room_listbox.see(i)
+                    break
+    
+    def get_selected_room_for_edit(self):
+        """Get selected room data from edit form"""
+        selection = self.edit_room_listbox.curselection()
+        if selection and hasattr(self, 'edit_room_data'):
+            return self.edit_room_data[selection[0]]
+        return None
+    
+    def save_booking_edits(self):
+        """Save changes to existing booking"""
+        # Get form data
+        title = self.edit_form_widgets['title'].get().strip()
+        date = self.edit_form_widgets['date'].get().strip()
+        start_time = self.edit_form_widgets['start_time'].get().strip()
+        end_time = self.edit_form_widgets['end_time'].get().strip()
+        notes = self.edit_form_widgets['notes'].get("1.0", tk.END).strip()
+        
+        selected_room = self.get_selected_room_for_edit()
+        
+        # Get additional attendees
+        additional_attendees = [email.strip() for email in self.edit_attendees_entry.get().split(",") if email.strip()]
+        
+        # Combine existing and new attendees
+        all_attendee_emails = list(self.current_attendee_emails) + additional_attendees
+        
+        # Validation
+        if not self._validate_booking_fields(title, date, selected_room):
+            return
+        
+        try:
+            # Prepare update data with all attendees (existing + new)
+            booking_data = {
+                "title": title,
+                "date": date,
+                "start_time": start_time,
+                "end_time": end_time,
+                "room_id": selected_room["id"],
+                "attendee_emails": all_attendee_emails,  # All attendees (existing + new)
+                "notes": notes,
+                "visibility": "private"  # Default visibility
+            }
+            
+            response = self.app.api_client.update_booking(self.editing_booking_id, booking_data)
+            
+            if response:
+                messagebox.showinfo("Success", "Booking updated successfully!")
+                self.show_manage_bookings()
+            else:
+                messagebox.showerror("Error", "Failed to update booking")
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to update booking: {str(e)}")
     
     def show_room_browser(self):
         """Show room browser"""
@@ -512,4 +1051,9 @@ class Dashboard:
         ttk.Label(error_frame, text=message, 
                  font=('Arial', 12), foreground='red').pack(pady=20)
         ttk.Button(error_frame, text="Retry", 
-                  command=self.show_upcoming_bookings).pack(pady=10)
+                  command=self.show_dashboard_view).pack(pady=10)
+    
+    def _show_error_in_frame(self, parent, message):
+        """Show error message in a specific frame"""
+        ttk.Label(parent, text=message, 
+                 font=('Arial', 12), foreground='red').pack(expand=True, pady=50)

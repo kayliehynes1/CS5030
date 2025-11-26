@@ -83,7 +83,7 @@ class AuthManager:
 
     def show_register_window(self):
         """Open a separate window for account creation."""
-        if self.register_window and tk.Toplevel.winfo_exists(self.register_window):
+        if self.register_window and self.register_window.winfo_exists():
             self.register_window.lift()
             return
 
@@ -146,6 +146,6 @@ class AuthManager:
             messagebox.showerror("Registration Error", f"Unable to create account: {exc}")
 
     def _close_register_window(self):
-        if self.register_window and tk.Toplevel.winfo_exists(self.register_window):
+        if self.register_window and self.register_window.winfo_exists():
             self.register_window.destroy()
         self.register_window = None

@@ -76,6 +76,9 @@ class APIClient:
     def get_upcoming_bookings(self):
         return self.make_request("GET", "/bookings/upcoming")
     
+    def get_past_bookings(self):
+        return self.make_request("GET", "/bookings/past")
+    
     def get_organized_bookings(self):
         return self.make_request("GET", "/bookings/organized")
     
@@ -95,13 +98,12 @@ class APIClient:
         return self.make_request("POST", f"/bookings/{booking_id}/accept")
     
     def decline_invitation(self, booking_id):
-        """Decline an invitation to a booking"""
         return self.make_request("POST", f"/bookings/{booking_id}/decline")
         
     # Room endpoints
     def get_available_rooms(self, date, start_time, end_time):
         params = {"date": date, "start_time": start_time, "end_time": end_time}
-        return self.make_request("GET", "/rooms/available", params)
+        return self.make_request("GET", "/rooms/available", params=params)
     
     def get_all_rooms(self):
         return self.make_request("GET", "/rooms")
