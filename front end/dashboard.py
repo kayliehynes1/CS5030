@@ -1281,7 +1281,7 @@ Notes: {booking.get('notes', 'None')}
         canvas_container = ttk.Frame(main_frame)
         canvas_container.pack(fill=tk.BOTH, expand=True)
         
-        self.rooms_canvas = tk.Canvas(canvas_container, bg='#F8FAFC', highlightthickness=0)
+        self.rooms_canvas = tk.Canvas(canvas_container, bg=COLORS['background'], highlightthickness=0)
         scrollbar = ttk.Scrollbar(canvas_container, orient="vertical", command=self.rooms_canvas.yview)
         
         self.rooms_frame = ttk.Frame(self.rooms_canvas)

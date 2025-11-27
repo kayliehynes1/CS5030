@@ -16,14 +16,14 @@ COLORS = {
     'danger': '#DC2626',
     'danger_light': '#FEE2E2',
     'warning': '#D97706',
-    'background': '#F8FAFC',
-    'surface': '#FFFFFF',
-    'surface_hover': '#F9FAFB',
-    'text': '#0F172A',
-    'text_secondary': '#64748B',
-    'border': '#E2E8F0',
-    'border_focus': '#2563EB',
-    'shadow': '#00000010',
+    'background': '#1C1C1E',
+    'surface': '#2A2A2C',
+    'surface_hover': '#333335',
+    'text': '#F4F4F5',
+    'text_secondary': '#A1A1AA',
+    'border': '#3A3A3C',
+    'border_focus': '#52525B',
+    'shadow': '#00000040',
     'accent': '#8B5CF6',
 }
 
@@ -333,4 +333,3 @@ class IconLabel(tk.Label):
         
         if icon_color:
             self.config(fg=icon_color)
-

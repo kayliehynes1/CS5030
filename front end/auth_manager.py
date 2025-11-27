@@ -20,19 +20,15 @@ class AuthManager:
         self.loading = False
         
         # Gradient-style background (two-tone)
-        bg_frame = tk.Frame(self.app.root, bg='#F8FAFC')
+        bg_frame = tk.Frame(self.app.root, bg=COLORS['background'])
         bg_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Top accent bar
-        accent_bar = tk.Frame(bg_frame, bg=COLORS['primary'], height=4)
-        accent_bar.pack(fill=tk.X)
-        
         # Center container
-        center = tk.Frame(bg_frame, bg='#F8FAFC')
+        center = tk.Frame(bg_frame, bg=COLORS['background'])
         center.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
         
         # Logo/Title area with modern design
-        header = tk.Frame(center, bg='#F8FAFC')
+        header = tk.Frame(center, bg=COLORS['background'])
         header.pack(pady=(0, 45))
         
         # Modern minimalist logo
@@ -40,7 +36,7 @@ class AuthManager:
             header,
             width=100,
             height=100,
-            bg='#F8FAFC',
+            bg=COLORS['background'],
             highlightthickness=0
         )
         logo_canvas.pack()
@@ -55,27 +51,27 @@ class AuthManager:
             header,
             text="Room Booking",
             font=('SF Pro Display', 32, 'bold'),
-            bg='#F8FAFC',
+            bg=COLORS['background'],
             fg=COLORS['text']
         ).pack(pady=(18, 0))
-        
+
         tk.Label(
             header,
             text="SYSTEM",
             font=('SF Pro Display', 14, 'bold'),
-            bg='#F8FAFC',
+            bg=COLORS['background'],
             fg=COLORS['primary']
         ).pack(pady=(0, 8))
-        
+
         # Subtitle with better styling
-        subtitle_frame = tk.Frame(header, bg='#F8FAFC')
+        subtitle_frame = tk.Frame(header, bg=COLORS['background'])
         subtitle_frame.pack()
-        
+
         tk.Label(
             subtitle_frame,
             text="University of St Andrews",
             font=('SF Pro Text', 12),
-            bg='#F8FAFC',
+            bg=COLORS['background'],
             fg=COLORS['text_secondary']
         ).pack()
         
@@ -120,18 +116,21 @@ class AuthManager:
         )
         self.password_entry.pack(fill=tk.X, pady=(0, 20))
         
+        # Container to reserve space under password for error messages
+        self.error_container = tk.Frame(login_card.container, bg=COLORS['surface'])
+        self.error_container.pack(fill=tk.X)
+        
         # Error message label (hidden by default)
         self.error_label = IconLabel(
-            login_card.container,
+            self.error_container,
             text="",
-            icon='error',
             font=('SF Pro Text', 10),
             bg=COLORS['surface'],
             fg=COLORS['danger'],
             wraplength=320,
             anchor='w'
         )
-        self.error_label.pack(pady=(0, 15), fill=tk.X)
+        # Do not pack yet; only show when an error occurs
         
         # Login button
         ModernButton(
@@ -175,11 +174,15 @@ class AuthManager:
     
     def show_error(self, message):
         """Display error message"""
+        if not self.error_label.winfo_ismapped():
+            self.error_label.pack(fill=tk.X, pady=(0, 15))
         self.error_label.config(text=f"× {message}", fg=COLORS['danger'])
     
     def clear_error(self):
         """Clear error message"""
         self.error_label.config(text="")
+        if self.error_label.winfo_ismapped():
+            self.error_label.pack_forget()
     
     def validate_email(self, email):
         """Basic email validation"""
@@ -302,7 +305,7 @@ class AuthManager:
         role_options = tk.Frame(role_frame, bg=COLORS['background'])
         role_options.pack(fill=tk.X)
         
-        for role, label in [('student', '● Student'), ('staff', '● Staff Member')]:
+        for role, label in [('student', 'Student'), ('staff', 'Staff Member')]:
             rb = tk.Radiobutton(
                 role_options,
                 text=label,
@@ -321,14 +324,13 @@ class AuthManager:
         self.reg_error_label = IconLabel(
             main,
             text="",
-            icon='error',
             font=('SF Pro Text', 10),
             bg=COLORS['background'],
             fg=COLORS['danger'],
             wraplength=350,
             anchor='w'
         )
-        self.reg_error_label.pack(pady=(10, 15), fill=tk.X)
+        # Hidden until an error needs to be shown
         
         # Buttons
         btn_frame = tk.Frame(main, bg=COLORS['background'])
@@ -353,7 +355,7 @@ class AuthManager:
     def register_user(self):
         """Register with comprehensive validation"""
         # Clear previous errors
-        self.reg_error_label.config(text="")
+        self._clear_reg_error()
         
         # Get values
         name = self.reg_name.get().strip()
@@ -363,32 +365,32 @@ class AuthManager:
         
         # Validation
         if not name:
-            self.reg_error_label.config(text="× Please enter your full name", fg=COLORS['danger'])
+            self._show_reg_error("Please enter your full name")
             self.reg_name.focus()
             return
         
         if len(name) < 2:
-            self.reg_error_label.config(text="× Name must be at least 2 characters", fg=COLORS['danger'])
+            self._show_reg_error("Name must be at least 2 characters")
             self.reg_name.focus()
             return
         
         if not email:
-            self.reg_error_label.config(text="× Please enter your email address", fg=COLORS['danger'])
+            self._show_reg_error("Please enter your email address")
             self.reg_email.focus()
             return
         
         if not self.validate_email(email):
-            self.reg_error_label.config(text="× Please enter a valid email address", fg=COLORS['danger'])
+            self._show_reg_error("Please enter a valid email address")
             self.reg_email.focus()
             return
         
         if not password:
-            self.reg_error_label.config(text="× Please enter a password", fg=COLORS['danger'])
+            self._show_reg_error("Please enter a password")
             self.reg_password.focus()
             return
         
         if len(password) < 8:
-            self.reg_error_label.config(text="× Password must be at least 8 characters", fg=COLORS['danger'])
+            self._show_reg_error("Password must be at least 8 characters")
             self.reg_password.focus()
             return
         
@@ -411,11 +413,11 @@ class AuthManager:
         except Exception as exc:
             error_msg = str(exc)
             if "409" in error_msg or "already registered" in error_msg.lower():
-                self.reg_error_label.config(text="× This email is already registered", fg=COLORS['danger'])
+                self._show_reg_error("This email is already registered")
             elif "connect" in error_msg.lower():
-                self.reg_error_label.config(text="× Cannot connect to server", fg=COLORS['danger'])
+                self._show_reg_error("Cannot connect to server")
             else:
-                self.reg_error_label.config(text=f"× {error_msg}", fg=COLORS['danger'])
+                self._show_reg_error(error_msg)
     
     def _close_register_window(self):
         if self.register_window:
@@ -425,3 +427,14 @@ class AuthManager:
                 pass
             self.register_window = None
 
+    def _show_reg_error(self, message: str):
+        """Show registration error message."""
+        if not self.reg_error_label.winfo_ismapped():
+            self.reg_error_label.pack(pady=(10, 15), fill=tk.X)
+        self.reg_error_label.config(text=f"× {message}", fg=COLORS['danger'])
+
+    def _clear_reg_error(self):
+        """Hide registration error message."""
+        self.reg_error_label.config(text="")
+        if self.reg_error_label.winfo_ismapped():
+            self.reg_error_label.pack_forget()

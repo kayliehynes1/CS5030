@@ -3,6 +3,7 @@ Modern Room Booking Client
 Beautiful, professional Tkinter application with keyboard shortcuts
 """
 import tkinter as tk
+from tkinter import ttk
 from auth_manager import AuthManager
 from dashboard import Dashboard
 from api_client import APIClient
@@ -15,6 +16,55 @@ class RoomBookingClient:
         self.root.title("University Room Booking System")
         self.root.geometry("1200x800")
         self.root.configure(bg=COLORS['background'])
+        
+        # Apply a dark palette to ttk widgets so backgrounds match the app shell
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(".", background=COLORS['background'], foreground=COLORS['text'])
+        style.configure("TFrame", background=COLORS['background'])
+        style.configure("TLabel", background=COLORS['background'], foreground=COLORS['text'])
+        style.configure("TButton", background=COLORS['surface'], foreground=COLORS['text'])
+        style.map("TButton", background=[("active", COLORS['surface_hover'])])
+        # Form controls: force dark backgrounds but black text for readability when highlighted/active
+        style.configure(
+            "TEntry",
+            background=COLORS['surface'],
+            fieldbackground=COLORS['surface'],
+            foreground=COLORS['text'],
+            insertcolor=COLORS['text']
+        )
+        style.configure(
+            "TCombobox",
+            background=COLORS['surface'],
+            fieldbackground=COLORS['surface'],
+            foreground=COLORS['text']
+        )
+        style.map(
+            "TCombobox",
+            foreground=[("readonly", COLORS['text']), ("active", COLORS['text']), ("focus", COLORS['text'])],
+            fieldbackground=[("readonly", COLORS['surface']), ("active", COLORS['surface'])],
+            selectbackground=[("readonly", COLORS['surface_hover']), ("!disabled", COLORS['surface_hover'])],
+            selectforeground=[("readonly", COLORS['text']), ("!disabled", COLORS['text'])],
+            background=[("readonly", COLORS['surface']), ("active", COLORS['surface'])]
+        )
+        style.configure("TNotebook", background=COLORS['background'])
+        style.configure("TNotebook.Tab", background=COLORS['surface'], foreground=COLORS['text'])
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", COLORS['surface_hover']), ("active", COLORS['surface_hover'])],
+            foreground=[("selected", COLORS['text']), ("active", COLORS['text'])]
+        )
+        style.configure("TLabelframe", background=COLORS['background'], foreground=COLORS['text'])
+        style.configure("TLabelframe.Label", background=COLORS['background'], foreground=COLORS['text'])
+        style.configure(
+            "Treeview",
+            background=COLORS['surface'],
+            fieldbackground=COLORS['surface'],
+            foreground=COLORS['text']
+        )
+        style.configure("Treeview.Heading", background=COLORS['surface'], foreground=COLORS['text'])
+        style.map("Treeview.Heading", foreground=[("active", "#000000"), ("pressed", "#000000")])
+        style.map("Treeview", background=[("selected", COLORS['primary'])], foreground=[("selected", "#ffffff")])
         
         # Center window on screen
         self.root.update_idletasks()
@@ -113,4 +163,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
