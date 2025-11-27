@@ -29,8 +29,17 @@ from .auth import (
     verify_password,
     hash_password
 )
+from .validation import (
+    validate_email,
+    validate_name,
+    validate_title,
+    validate_notes,
+    validate_password,
+    validate_role,
+    sanitize_string
+)
 
-router = APIRouter(prefix="/api")
+router = APIRouter()
 
 
 def create_notification(user_id: int, notif_type: str, title: str, message: str, booking_id: int = None):
@@ -145,20 +154,33 @@ def health_check() -> dict[str, str]:
 
 @router.post("/auth/register", response_model=LoginResponse, status_code=201)
 def register(data: RegisterRequest) -> LoginResponse:
-    """Create a new user account."""
+    """
+    Create a new user account.
+    
+    Validates:
+    - Email format and uniqueness
+    - Name length (2-100 chars)
+    - Password length (8-128 chars)
+    - Role (student/staff/admin)
+    """
+    # Validate and sanitize inputs
+    clean_name = validate_name(sanitize_string(data.name), "Name")
+    clean_email = validate_email(data.email)
+    validate_password(data.password)
+    clean_role = validate_role(data.role)
     
     # Check if email already exists
-    if any(u.email == data.email for u in USERS):
+    if any(u.email == clean_email for u in USERS):
         raise HTTPException(status_code=409, detail="Email already registered")
     
     # Create new user with hashed password
     next_id = max([user.id for user in USERS] + [0]) + 1
     new_user = User(
         id=next_id,
-        name=data.name,
-        email=data.email,
+        name=clean_name,
+        email=clean_email,
         password_hash=hash_password(data.password),
-        role=data.role.lower() if data.role else "student",
+        role=clean_role,
         failed_attempts=0,
         locked_until=None
     )
@@ -426,9 +448,20 @@ def create_booking(
     current_user: User = Depends(get_current_user)
 ) -> BookingResponse:
     """
-    Create a new booking with validation
+    Create a new booking with comprehensive validation.
+    
+    Validates:
+    - Title length (3-200 chars)
+    - Notes length (max 2000 chars)
+    - Date/time format and range
+    - Room exists and is available
+    - Attendee emails are valid users
+    - Room capacity not exceeded
     """
-
+    # Validate title and notes
+    clean_title = validate_title(sanitize_string(req.title))
+    clean_notes = validate_notes(sanitize_string(req.notes))
+    
     start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     room = _get_room_or_404(req.room_id)
     attendee_ids = _resolve_attendees(req.attendee_emails)
@@ -445,8 +478,8 @@ def create_booking(
         organiser_id=current_user.id,
         attendee_ids=[], 
         pending_attendee_ids=attendee_ids, 
-        title=req.title,
-        notes=req.notes,
+        title=clean_title,
+        notes=clean_notes,
         start_time=start,
         end_time=end,
         visibility=req.visibility,
@@ -468,10 +501,18 @@ def update_booking(
 ) -> BookingResponse:
     """
     Update a booking (organiser-only).
+    
+    Authorization: Only the booking organizer can update.
     """
-
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
+    
+    # Authorization check: Only organizer can update
+    if booking.organiser_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the booking organizer can update this booking"
+        )
 
 
     start, end = _parse_request_times(req.date, req.start_time, req.end_time)
@@ -496,7 +537,7 @@ def update_booking(
     _ensure_room_available(req.room_id, start, end, exclude_booking_id=booking.id)
 
     # Update booking
-    updated_booking = booking.copy(update={
+    updated_booking = booking.model_copy(update={
         "room_id": req.room_id,
         "attendee_ids": accepted_attendees, 
         "pending_attendee_ids": all_pending,
@@ -522,9 +563,18 @@ def delete_booking(
     """
     Delete a booking (organisers only). 
     Optionally accepts a cancellation reason that will be included in notifications.
+    
+    Authorization: Only the booking organizer can delete.
     """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
+    
+    # Authorization check: Only organizer can delete
+    if booking.organiser_id != current_user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the booking organizer can cancel this booking"
+        )
 
     # Get room name for notification
     room = next((r for r in ROOMS if r.id == booking.room_id), None)

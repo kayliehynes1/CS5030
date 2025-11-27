@@ -12,7 +12,7 @@ import requests
 class APIClient:
     """Talk to backend API"""
     
-    def __init__(self, base_url="http://localhost:8000/api"):
+    def __init__(self, base_url="http://localhost:8000"):
         self.base_url = base_url
         self.token = None
         self.headers = {}
@@ -43,12 +43,20 @@ class APIClient:
         except requests.exceptions.Timeout:
             raise Exception("Request timed out")
         except requests.exceptions.HTTPError as e:
+            error_detail = "Bad request"
+            if response.content:
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get('detail', str(error_data))
+                except:
+                    error_detail = response.text[:100] if response.text else "Bad request"
+            
             error_map = {
                 401: "Unauthorized - Invalid email or password",
                 404: "Resource not found",
-                400: f"Bad request: {response.json().get('detail', 'Bad request') if response.content else 'Bad request'}"
+                400: f"Bad request: {error_detail}"
             }
-            raise Exception(error_map.get(response.status_code, f"HTTP {response.status_code}: {str(e)}"))
+            raise Exception(error_map.get(response.status_code, f"HTTP {response.status_code}: {error_detail}"))
         except ValueError:
             # ValueError catches JSONDecodeError (which inherits from ValueError)
             # This happens when response.json() fails to parse the response
@@ -108,6 +116,10 @@ class APIClient:
     # User endpoints
     def get_user_profile(self):
         return self.make_request("GET", "/user/profile")
+    
+    def get_users(self):
+        """Get all users (for attendee selection)"""
+        return self.make_request("GET", "/users")
     
     # Notification endpoints
     def get_notifications(self):

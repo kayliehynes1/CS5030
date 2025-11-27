@@ -1,32 +1,30 @@
 # Backend
 
-This repository currently contains the backend for the CS5030 Coursework 2 room booking system. It exposes a minimal FastAPI service with in-memory data.
+FastAPI server for the room booking system.
 
-## What's Included
+## Setup
 
-- `backend/app/data.py` — Pydantic models (`User`, `Room`, `Booking`) and example seed data stored in lists.
-- `backend/app/routes.py` — Endpoints for service health, users, rooms, and bookings.
-- `backend/app/__init__.py` — FastAPI application factory that wires the router.
-- `backend/run.py` — Development entry point that runs Uvicorn with auto-reload.
-- `README.md` — Overview and usage instructions.
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-## Setting up a Virtual Environment
+## Run
 
-macOS / Linux:
+```bash
+python run.py
+```
 
-1. `python3 -m venv .venv`
-2. `source .venv/bin/activate`
-3. Install dependencies inside the environment.
+Server starts at `http://localhost:8000`
 
-Windows (PowerShell):
+## API Docs
 
-1. `python -m venv .venv`
-2. `.venv\Scripts\Activate.ps1`
-3. Install dependencies inside the environment.
+- Swagger: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
-## Running the Server
+## Tests
 
-1. Activate the virtual environment (see above).
-2. Install FastAPI and Uvicorn `pip install fastapi uvicorn`.
-3. From the project root, run `python backend/run.py`.
-4. Visit `http://127.0.0.1:8000/health` to verify the service is running.
+```bash
+pytest tests/ -v
+```

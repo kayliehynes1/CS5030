@@ -105,8 +105,28 @@ USERS: List[User] = [
 ]
 
 ROOMS: List[Room] = [
-    Room(id=1, name="Seminar Room A", capacity=12, facilities=["projector", "whiteboard"], building="Main Building"),
-    Room(id=2, name="Collaboration Hub", capacity=8, facilities=["display", "video conferencing"], building="Jack Cole Building"),
+    # Small rooms (1-8 people)
+    Room(id=1, name="Study Room 101", capacity=4, facilities=["whiteboard"], building="Library"),
+    Room(id=2, name="Tutorial Room A", capacity=6, facilities=["whiteboard", "display"], building="Main Building"),
+    Room(id=3, name="Meeting Pod 1", capacity=4, facilities=["video conferencing"], building="Jack Cole Building"),
+    Room(id=4, name="Group Study 202", capacity=8, facilities=["whiteboard", "projector"], building="Gateway Building"),
+    
+    # Medium rooms (10-25 people)
+    Room(id=5, name="Seminar Room A", capacity=12, facilities=["projector", "whiteboard", "sound system"], building="Main Building"),
+    Room(id=6, name="Collaboration Hub", capacity=15, facilities=["display", "video conferencing", "whiteboard"], building="Jack Cole Building"),
+    Room(id=7, name="Teaching Room 301", capacity=20, facilities=["projector", "whiteboard", "document camera"], building="Science Building"),
+    Room(id=8, name="Workshop Space", capacity=18, facilities=["whiteboard", "display", "movable furniture"], building="Gateway Building"),
+    Room(id=9, name="Computer Lab 1", capacity=25, facilities=["computers", "projector", "whiteboard"], building="Jack Cole Building"),
+    
+    # Large rooms (30-60 people)
+    Room(id=10, name="Lecture Theatre A", capacity=50, facilities=["projector", "sound system", "microphone", "recording"], building="Main Building"),
+    Room(id=11, name="Auditorium B", capacity=60, facilities=["projector", "sound system", "microphone", "video conferencing", "recording"], building="Gateway Building"),
+    Room(id=12, name="Conference Hall", capacity=40, facilities=["projector", "whiteboard", "sound system", "video conferencing"], building="Main Building"),
+    
+    # Specialized rooms
+    Room(id=13, name="Innovation Lab", capacity=30, facilities=["whiteboard", "display", "video conferencing", "coffee machine"], building="Jack Cole Building"),
+    Room(id=14, name="Presentation Studio", capacity=20, facilities=["projector", "recording equipment", "green screen", "sound system"], building="Gateway Building"),
+    Room(id=15, name="Board Room", capacity=12, facilities=["display", "video conferencing", "whiteboard", "coffee machine"], building="Main Building"),
 ]
 
 _base_time = datetime(2025, 1, 15, 9, 0, 0)
