@@ -69,7 +69,7 @@ class APIClient:
     def login(self, email, password):
         return self.make_request("POST", "/auth/login", {"email": email, "password": password})
     
-    def register(self, name, email, password, role="student"):
+    def register(self, name, email, password, role="attendee"):
         return self.make_request("POST", "/auth/register",
                                 {"name": name, "email": email, "password": password, "role": role})
     

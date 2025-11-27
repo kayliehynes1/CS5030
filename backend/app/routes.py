@@ -40,6 +40,7 @@ from .validation import (
 )
 
 router = APIRouter()
+ORGANISER_ROLES = {"organiser"}
 
 
 def create_notification(user_id: int, notif_type: str, title: str, message: str, booking_id: int = None):
@@ -58,6 +59,15 @@ def create_notification(user_id: int, notif_type: str, title: str, message: str,
     NOTIFICATIONS.append(notification)
     save_notifications(NOTIFICATIONS)
     return notification
+
+
+def _require_organiser(user: User) -> None:
+    """Ensure the current user has organiser privileges."""
+    if user.role.lower() not in ORGANISER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Only organisers can perform this action"
+        )
 
 
 def process_booking_reminders():
@@ -161,7 +171,7 @@ def register(data: RegisterRequest) -> LoginResponse:
     - Email format and uniqueness
     - Name length (2-100 chars)
     - Password length (8-128 chars)
-    - Role (student/staff/admin)
+    - Role (attendee/organiser)
     """
     # Validate and sanitize inputs
     clean_name = validate_name(sanitize_string(data.name), "Name")
@@ -261,17 +271,11 @@ def list_users(current_user: User = Depends(get_current_user)) -> List[PublicUse
 
 @router.get("/rooms", response_model=List[Room])
 def list_rooms(current_user: User = Depends(get_current_user)) -> List[Room]:
-    """Return all rooms and their facilities. Filtered based on user role. """
-    if current_user.role.lower() == "staff":
+    """Return all rooms and their facilities. Organisers see all; attendees see unrestricted rooms."""
+    if current_user.role.lower() in ORGANISER_ROLES:
         return ROOMS
     
-    # If user is student (or other role), only show unrestricted rooms
-    filtered_rooms = [
-        room for room in ROOMS 
-        if not room.restricted_to
-    ]
-    
-    return filtered_rooms
+    return [room for room in ROOMS if not room.restricted_to]
 
 
 @router.get("/rooms/available", response_model=List[Room])
@@ -468,6 +472,7 @@ def create_booking(req: CreateBookingRequest, current_user: User = Depends(get_c
     - Attendee emails are valid users
     - Room capacity not exceeded
     """
+    _require_organiser(current_user)
     # Validate title and notes
     clean_title = validate_title(sanitize_string(req.title))
     clean_notes = validate_notes(sanitize_string(req.notes))
@@ -509,6 +514,7 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
     
     Authorization: Only the booking organizer can update.
     """
+    _require_organiser(current_user)
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
@@ -570,6 +576,7 @@ def delete_booking(
     
     Authorization: Only the booking organizer can delete.
     """
+    _require_organiser(current_user)
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     

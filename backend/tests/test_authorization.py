@@ -94,6 +94,18 @@ class TestBookingAuthorization:
         
         # Cleanup
         client.delete(f"/bookings/{booking_id}", headers=self.alice_headers)
+
+    def test_attendee_cannot_create_booking(self):
+        """Attendees should be blocked from creating bookings"""
+        response = client.post("/bookings", json={
+            "room_id": 1,
+            "title": "Attendee Attempt",
+            "date": "2025-12-24",
+            "start_time": "10:00",
+            "end_time": "11:00"
+        }, headers=self.ben_headers)
+        assert response.status_code == 403
+        assert "organiser" in response.json()["detail"].lower()
     
     def test_organizer_can_delete_own_booking(self):
         """Test that booking organizer can delete their booking"""
@@ -196,4 +208,3 @@ class TestNotificationAuthorization:
         # (This is verified by the endpoint logic, but we confirm it returns data)
         notifications = response.json()
         assert isinstance(notifications, list)
-

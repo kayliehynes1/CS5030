@@ -35,21 +35,6 @@ def auth_headers(client):
 
 
 @pytest.fixture(scope="function")
-def staff_auth_headers(client):
-    """Get authentication headers for a staff user"""
-    response = client.post("/auth/login", json={
-        "email": "chloesmith@st-andrews.ac.uk",
-        "password": "password2025"
-    })
-    
-    if response.status_code == 200:
-        token = response.json()["token"]
-        return {"Authorization": f"Bearer {token}"}
-    
-    pytest.skip("Could not authenticate staff user")
-
-
-@pytest.fixture(scope="function")
 def test_booking_data():
     """Sample booking data for tests"""
     return {
@@ -73,7 +58,7 @@ def test_user_data():
         "name": f"Test User {unique_id}",
         "email": f"testuser_{unique_id}@test.com",
         "password": "testpassword123",
-        "role": "student"
+        "role": "attendee"
     }
 
 
@@ -85,4 +70,3 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: mark test as slow running"
     )
-

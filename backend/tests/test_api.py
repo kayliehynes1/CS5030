@@ -30,7 +30,7 @@ class TestAuthEndpoints:
             "name": "Test User",
             "email": unique_email,
             "password": "secure_password123",  # At least 8 chars
-            "role": "student"
+            "role": "attendee"
         })
         
         assert response.status_code == 201
@@ -47,7 +47,7 @@ class TestAuthEndpoints:
             "name": "Duplicate User",
             "email": unique_email,
             "password": "password12345",  # At least 8 chars
-            "role": "student"
+            "role": "attendee"
         }
         
         # Register first time
@@ -78,7 +78,7 @@ class TestAuthEndpoints:
             "name": "Test User",
             "email": "not_an_email",
             "password": "password",
-            "role": "student"
+            "role": "attendee"
         })
         # Server should reject with 400 (bad request) or 422 (validation error)
         assert response.status_code in [400, 422]
@@ -97,7 +97,7 @@ class TestAuthEndpoints:
                 "name": malicious,
                 "email": f"{malicious}@test.com",
                 "password": malicious,
-                "role": "student"
+                "role": "attendee"
             })
             # Should not crash - either accept or reject gracefully
             assert response.status_code in [201, 400, 422]
@@ -112,7 +112,7 @@ class TestAuthEndpoints:
             "name": "Login Test User",
             "email": unique_email,
             "password": "testpass12345",  # At least 8 chars
-            "role": "student"
+            "role": "attendee"
         })
         
         # Then try to login
@@ -258,7 +258,7 @@ class TestMaliciousInput:
             "name": long_string,
             "email": f"longtest@test.com",  # Keep email reasonable
             "password": long_string,
-            "role": "student"
+            "role": "attendee"
         })
         
         # Should not crash - either accept or reject gracefully
@@ -272,7 +272,7 @@ class TestMaliciousInput:
             "name": special_chars,
             "email": "special@test.com",
             "password": special_chars,
-            "role": "student"
+            "role": "attendee"
         })
         
         # Should handle gracefully
@@ -286,7 +286,7 @@ class TestMaliciousInput:
             "name": unicode_text,
             "email": "unicode@test.com",
             "password": "password",
-            "role": "student"
+            "role": "attendee"
         })
         
         # Should handle gracefully
@@ -301,4 +301,3 @@ class TestMaliciousInput:
         
         # Should not crash
         assert response.status_code in [401, 422]
-

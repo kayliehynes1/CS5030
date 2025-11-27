@@ -69,7 +69,7 @@ class TestSQLInjection:
                 "name": payload if len(payload) >= 2 else "AB",  # Name must be 2+ chars
                 "email": f"sqli{unique_id}@test.com",
                 "password": "password12345",  # At least 8 chars
-                "role": "student"
+                "role": "attendee"
             })
             # Should handle gracefully (reject or accept safely)
             assert response.status_code in [201, 400, 422]
@@ -95,7 +95,7 @@ class TestXSSPrevention:
                 "name": payload,
                 "email": f"xss{unique_id}@test.com",
                 "password": "password12345",  # At least 8 chars
-                "role": "student"
+                "role": "attendee"
             })
             # Should not crash
             assert response.status_code in [201, 400, 422]
@@ -161,7 +161,7 @@ class TestBufferOverflow:
             "name": "Test",
             "email": long_email,
             "password": "password123",
-            "role": "student"
+            "role": "attendee"
         })
         # Should reject gracefully, not crash
         assert response.status_code in [400, 422]
@@ -173,7 +173,7 @@ class TestBufferOverflow:
             "name": "Test",
             "email": "longpwd@test.com",
             "password": long_password,
-            "role": "student"
+            "role": "attendee"
         })
         # Should reject gracefully
         assert response.status_code in [400, 422]
@@ -187,7 +187,7 @@ class TestBufferOverflow:
             "name": long_name,
             "email": f"longname{unique_id}@test.com",
             "password": "password12345",  # At least 8 chars
-            "role": "student"
+            "role": "attendee"
         })
         # Should reject gracefully
         assert response.status_code in [400, 422]
@@ -214,7 +214,7 @@ class TestUnicodeEdgeCases:
                 "name": name,
                 "email": f"unicode{unique_id}@test.com",
                 "password": "password12345",  # At least 8 chars
-                "role": "student"
+                "role": "attendee"
             })
             # Should handle gracefully
             assert response.status_code in [201, 400, 422]
@@ -296,4 +296,3 @@ class TestAuthorizationBypass:
                 headers={"Authorization": f"Bearer {tampered}"}
             )
             assert response.status_code == 401
-

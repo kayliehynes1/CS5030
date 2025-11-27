@@ -37,10 +37,11 @@ python3.11 main.py
 
 ## Test Accounts
 
-| Role    | Email                           | Password      |
-|---------|--------------------------------|---------------|
-| Student | alicejohnson@st-andrews.ac.uk  | password123   |
-| Staff   | chloesmith@st-andrews.ac.uk    | password2025  |
+| Role       | Email                           | Password      |
+|------------|--------------------------------|---------------|
+| Organiser  | alicejohnson@st-andrews.ac.uk  | password123   |
+| Organiser  | chloesmith@st-andrews.ac.uk    | password2025  |
+| Attendee   | benlee@st-andrews.ac.uk        | password012!  |
 
 ## Running Tests
 

@@ -300,12 +300,12 @@ class AuthManager:
             fg=COLORS['text']
         ).pack(anchor='w', pady=(0, 8))
         
-        self.role_var = tk.StringVar(value="student")
+        self.role_var = tk.StringVar(value="attendee")
         
         role_options = tk.Frame(role_frame, bg=COLORS['background'])
         role_options.pack(fill=tk.X)
         
-        for role, label in [('student', 'Student'), ('staff', 'Staff Member')]:
+        for role, label in [('attendee', 'Attendee'), ('organiser', 'Organiser')]:
             rb = tk.Radiobutton(
                 role_options,
                 text=label,

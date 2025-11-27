@@ -38,6 +38,18 @@ class Dashboard:
 
         return True
 
+    def _is_organiser(self) -> bool:
+        """Return True if current user has organiser privileges."""
+        role = (self.app.current_user or {}).get('role', '').lower()
+        return role == "organiser"
+
+    def _require_organiser(self, action_label: str) -> bool:
+        """Guard organiser-only actions in the client."""
+        if self._is_organiser():
+            return True
+        messagebox.showerror("Organiser Only", f"{action_label} requires organiser permissions.")
+        return False
+
     def _load_available_rooms(self, date: str, start_time: str, end_time: str, listbox: tk.Listbox, store_attr: str) -> list:
         """Fetch available rooms and populate a given listbox, storing results on the instance."""
         # Show loading state
@@ -128,14 +140,16 @@ class Dashboard:
         nav_frame = ttk.Frame(self.app.root)
         nav_frame.pack(fill=tk.X, padx=20, pady=10)
         
-        # Navigation buttons
-        nav_buttons = [
-            ("Dashboard", self.show_dashboard_view),
-            ("Create Booking", self.show_create_booking),
+        # Navigation buttons (attendees cannot create bookings)
+        is_organiser = self._is_organiser()
+        nav_buttons = [("Dashboard", self.show_dashboard_view)]
+        if is_organiser:
+            nav_buttons.append(("Create Booking", self.show_create_booking))
+        nav_buttons.extend([
             ("Manage Bookings", self.show_manage_bookings),
             ("Available Rooms", self.show_room_browser),
             ("Profile", self.show_profile)
-        ]
+        ])
         
         for text, command in nav_buttons:
             btn = ttk.Button(nav_frame, text=text, command=command)
@@ -720,6 +734,8 @@ Notes: {booking.get('notes', 'None')}
     
     def show_create_booking(self, preselected_room=None):
         """Show booking creation form with optional pre-selected room"""
+        if not self._require_organiser("Creating bookings"):
+            return
         self.clear_content()
         
         # Update notification badge
@@ -1016,6 +1032,8 @@ Notes: {booking.get('notes', 'None')}
     
     def edit_booking(self, booking):
         """Edit existing booking"""
+        if not self._require_organiser("Editing bookings"):
+            return
         self.clear_content()
         
         form_frame = ttk.Frame(self.content_frame)
@@ -1135,6 +1153,8 @@ Notes: {booking.get('notes', 'None')}
     
     def cancel_booking(self, booking):
         """Cancel a booking with optional reason"""
+        if not self._require_organiser("Cancelling bookings"):
+            return
         # Show reason dialog
         result = self._show_reason_dialog(
             "Cancel Booking",
@@ -1188,6 +1208,8 @@ Notes: {booking.get('notes', 'None')}
     
     def save_booking_edits(self):
         """Save changes to existing booking"""
+        if not self._require_organiser("Editing bookings"):
+            return
         # Get form data
         title = self.edit_form_widgets['title'].get().strip()
         date = self.edit_form_widgets['date'].get().strip()

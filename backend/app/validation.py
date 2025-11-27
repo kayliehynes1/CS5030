@@ -17,6 +17,10 @@ MAX_NOTES_LENGTH = 2000
 MAX_EMAIL_LENGTH = 254
 MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
+VALID_ROLES = ["attendee", "organiser"]
+ROLE_ALIASES = {
+    "student": "attendee",  # backwards compatibility with earlier iteration
+}
 
 # Email regex pattern (RFC 5322 simplified)
 EMAIL_PATTERN = re.compile(
@@ -184,30 +188,23 @@ def validate_password(password: str) -> str:
 
 def validate_role(role: str) -> str:
     """
-    Validate user role.
-    
-    Args:
-        role: Role string to validate
-        
-    Returns:
-        Normalized role (lowercase)
-        
-    Raises:
-        HTTPException: If role is invalid
+    Validate user role into the two supported classes:
+    - attendee
+    - organiser
     """
     if not role:
-        return "student"  # Default role
+        return "attendee"
     
     role = role.strip().lower()
-    valid_roles = ["student", "staff", "admin"]
+    normalized_role = ROLE_ALIASES.get(role, role)
     
-    if role not in valid_roles:
+    if normalized_role not in VALID_ROLES:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+            detail=f"Invalid role. Must be one of: {', '.join(VALID_ROLES)}"
         )
     
-    return role
+    return normalized_role
 
 
 def sanitize_string(value: str | None) -> str | None:
@@ -231,4 +228,3 @@ def sanitize_string(value: str | None) -> str | None:
     value = ' '.join(value.split())
     
     return value if value else None
-
