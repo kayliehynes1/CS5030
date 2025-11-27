@@ -976,7 +976,7 @@ Notes: {booking.get('notes', 'None')}
             
             # Pending invitations sub-tab
             pending_frame = ttk.Frame(sub_notebook)
-            sub_notebook.add(pending_frame, text="⏳ Pending Invitations")
+            sub_notebook.add(pending_frame, text="Pending Invitations")
             self._display_bookings_table(pending_frame, pending, action_type='pending')
             
             # Accepted bookings sub-tab
