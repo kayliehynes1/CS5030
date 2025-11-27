@@ -104,7 +104,9 @@ USERS: List[User] = [
 
 ROOMS: List[Room] = [
     Room(id=1, name="Seminar Room A", capacity=12, facilities=["projector", "whiteboard"], building="Main Building"),
-    Room(id=2, name="Collaboration Hub", capacity=8, facilities=["display", "video conferencing"], building="Jack Cole Building"),
+    Room(id=2, name="Collaboration Hub", capacity=8, facilities=["display", "video conferencing"], accessibility=["hearing loop"], building="Computer Science Building"),
+    Room(id=3, name="Study Room B", capacity=6, facilities=["whiteboard"], accessibility=["wheelchair accessible"],restricted_to=[], building="Library"),
+    Room(id=4, name="Faculty Meeting Room", capacity=15, facilities=["projector", "video conferencing", "whiteboard"], accessibility=[],restricted_to=["staff"], building="Admin Building"),
 ]
 
 _base_time = datetime(2025, 1, 15, 9, 0, 0)

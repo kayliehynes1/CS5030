@@ -239,8 +239,17 @@ def list_users(current_user: User = Depends(get_current_user)) -> List[PublicUse
 
 @router.get("/rooms", response_model=List[Room])
 def list_rooms(current_user: User = Depends(get_current_user)) -> List[Room]:
-    """Return all rooms and their facilities."""
-    return ROOMS
+    """Return all rooms and their facilities. Filtered based on user role. """
+    if current_user.role.lower() == "staff":
+        return ROOMS
+    
+    # If user is student (or other role), only show unrestricted rooms
+    filtered_rooms = [
+        room for room in ROOMS 
+        if not room.restricted_to
+    ]
+    
+    return filtered_rooms
 
 
 @router.get("/rooms/available", response_model=List[Room])
@@ -266,6 +275,10 @@ def get_available_rooms(
     # Find rooms that don't have conflicting bookings
     available_rooms = []
     for room in ROOMS:
+        # Check if user can access this room
+        if room.restricted_to:
+            if current_user.role.lower() not in [r.lower() for r in room.restricted_to]:
+                continue
         is_available = True
         for booking in BOOKINGS:
             if booking.room_id == room.id:
