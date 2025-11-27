@@ -672,12 +672,10 @@ def accept_invitation(booking_id: int, current_user: User = Depends(get_current_
                 detail="You don't have a pending invitation to this booking"
             )
     
-    
-    # Validation: Check room capacity
+    # Validation: Check room capacity (organiser + accepted + pending, including self)
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     if room:
-        # Count: current accepted attendees + organiser + new person
-        total_people = len(booking.attendee_ids) + 1 + 1
+        total_people = len(booking.attendee_ids) + len(booking.pending_attendee_ids) + 1
         if total_people > room.capacity:
             raise HTTPException(
                 status_code=400, 
@@ -723,7 +721,7 @@ def register_for_booking(booking_id: int, current_user: User = Depends(get_curre
 
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     if room:
-        total_people = len(booking.attendee_ids) + 1 + 1  # existing attendees + organiser + new person
+        total_people = len(booking.attendee_ids) + len(booking.pending_attendee_ids) + 1 + 1  # organiser + pending + accepted + new person
         if total_people > room.capacity:
             raise HTTPException(status_code=400, detail="Booking is at full capacity")
 
