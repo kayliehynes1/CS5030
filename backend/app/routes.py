@@ -544,7 +544,9 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
             detail="Only the booking organizer can update this booking"
         )
 
-
+    # Reuse creation sanitization/validation
+    clean_title = validate_title(sanitize_string(req.title))
+    clean_notes = validate_notes(sanitize_string(req.notes))
     start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     new_attendee_ids = _resolve_attendees(req.attendee_emails)
     
@@ -571,8 +573,8 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
         "room_id": req.room_id,
         "attendee_ids": accepted_attendees, 
         "pending_attendee_ids": all_pending,
-        "title": req.title,
-        "notes": req.notes,
+        "title": clean_title,
+        "notes": clean_notes,
         "start_time": start,
         "end_time": end,
     })
