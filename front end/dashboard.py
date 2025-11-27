@@ -76,9 +76,9 @@ class Dashboard:
             
             if self.notification_badge:
                 if self.unread_notification_count > 0:
-                    self.notification_badge.config(text=f"({self.unread_notification_count})")
+                    self.notification_badge.config(text=f"Notifications ({self.unread_notification_count})")
                 else:
-                    self.notification_badge.config(text="0")
+                    self.notification_badge.config(text="Notifications")
         except Exception:
             # Silently fail - not critical
             pass
