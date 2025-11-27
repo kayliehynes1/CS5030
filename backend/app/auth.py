@@ -7,7 +7,7 @@ from typing import Optional
 import bcrypt
 from jose import jwt
 from jose.exceptions import JWTError
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from fastapi import Header, HTTPException
 
@@ -38,7 +38,6 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
-
 class LoginResponse(BaseModel):
     # Login response with token and user info
     token: str
@@ -49,6 +48,33 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     role: str = "student"
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if len(v) > 100:
+            raise ValueError("Name must be less than 100 characters")
+        if len(v.strip()) == 0:
+            raise ValueError("Name cannot be empty")
+        return v.strip()
+    
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+        if len(v) > 50:
+            raise ValueError("Password must be less than 50 characters")
+        return v
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v):
+        if len(v) > 50:
+            raise ValueError("Email must be less than 50 characters")
+        if '@' not in v or '.' not in v:
+            raise ValueError("Invalid email format")
+        return v.lower().strip()
 
 
 
