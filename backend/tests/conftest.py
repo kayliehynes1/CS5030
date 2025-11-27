@@ -8,6 +8,11 @@ Provides:
 """
 import pytest
 from fastapi.testclient import TestClient
+import sys
+from pathlib import Path
+
+# Ensure the backend package is importable when running tests from varied working dirs
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import app
 from app.data import USERS, BOOKINGS, ROOMS, NOTIFICATIONS
 

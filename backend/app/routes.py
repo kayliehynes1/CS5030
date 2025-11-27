@@ -66,7 +66,7 @@ def _require_organiser(user: User) -> None:
     if user.role.lower() not in ORGANISER_ROLES:
         raise HTTPException(
             status_code=403,
-            detail="Only organisers can perform this action"
+            detail="Only organisers/organizers can perform this action"
         )
 
 
