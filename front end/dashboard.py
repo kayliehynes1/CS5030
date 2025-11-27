@@ -146,6 +146,7 @@ class Dashboard:
         if is_organiser:
             nav_buttons.append(("Create Booking", self.show_create_booking))
         nav_buttons.extend([
+            ("Open Meetings", self.show_open_meetings),
             ("Manage Bookings", self.show_manage_bookings),
             ("Available Rooms", self.show_room_browser),
             ("Profile", self.show_profile)
@@ -196,6 +197,22 @@ class Dashboard:
         past_frame = ttk.Frame(notebook)
         notebook.add(past_frame, text="Past Bookings")
         self._show_past_bookings_content(past_frame)
+        
+        # Public bookings tab for quick access
+        public_frame = ttk.Frame(notebook)
+        notebook.add(public_frame, text="Open Meetings")
+        self._show_public_bookings_content(public_frame)
+
+    def show_open_meetings(self):
+        """Standalone view for browsing open meetings"""
+        self.clear_content()
+        self.update_notification_badge()
+        
+        main_frame = ttk.Frame(self.content_frame)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        ttk.Label(main_frame, text="Open Meetings", font=('Arial', 16, 'bold')).pack(pady=(0, 15))
+        self._show_public_bookings_content(main_frame)
     
     def _show_upcoming_bookings_content(self, parent):
         """Show upcoming bookings content"""
@@ -218,6 +235,17 @@ class Dashboard:
         except Exception as e:
             self._show_error_in_frame(parent, "Unable to load upcoming bookings")
     
+    def _show_public_bookings_content(self, parent):
+        """Show public/open bookings for self-registration"""
+        try:
+            bookings = self.app.api_client.get_public_bookings()
+            if not bookings:
+                ttk.Label(parent, text="No open meetings available", font=('Arial', 14)).pack(expand=True, pady=40)
+                return
+            self._display_bookings_table(parent, bookings, action_type='public')
+        except Exception:
+            self._show_error_in_frame(parent, "Unable to load open meetings")
+    
     def _show_past_bookings_content(self, parent):
         """Show past bookings content"""
         try:
@@ -237,7 +265,7 @@ class Dashboard:
     def _display_bookings_table(self, parent, bookings, action_type='none'):
         """
         Display bookings in a table format
-        action_type: 'organizer', 'pending', 'accepted', 'mixed', 'past', or 'none'
+        action_type: 'organizer', 'pending', 'accepted', 'mixed', 'past', 'public', or 'none'
         """
         if not bookings:
             ttk.Label(parent, text="No bookings found").pack(pady=50)
@@ -334,6 +362,11 @@ class Dashboard:
             
             ttk.Button(action_frame, text="View Details", 
                       command=lambda: self._on_booking_select(tree)).pack(side=tk.LEFT, padx=5)
+        elif action_type == 'public':
+            action_frame = ttk.Frame(container)
+            action_frame.pack(fill=tk.X, pady=10, padx=10)
+            ttk.Label(action_frame, text="Select a meeting to register:", font=('Arial', 10)).pack(side=tk.LEFT, padx=5)
+            ttk.Button(action_frame, text="Register", command=lambda: self._register_for_public(tree)).pack(side=tk.LEFT, padx=5)
     
     def _on_booking_select(self, tree):
         """Handle booking selection"""
@@ -588,6 +621,27 @@ Notes: {booking.get('notes', 'None')}
                 
         except Exception as e:
             messagebox.showerror("Error", f"Unable to accept invitation: {str(e)}")
+    
+    def _register_for_public(self, tree):
+        """Register for a public meeting"""
+        selection = tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a meeting to register")
+            return
+        
+        booking_id = tree.item(selection[0], "tags")[0]
+        booking = self.current_bookings.get(booking_id, {})
+        title = booking.get('title', 'this meeting')
+        
+        if not messagebox.askyesno("Confirm Registration", f"Join '{title}'?"):
+            return
+        
+        try:
+            self.app.api_client.register_for_booking(int(booking_id))
+            messagebox.showinfo("Registered", f"You are now registered for '{title}'")
+            self.show_open_meetings()
+        except Exception as e:
+            messagebox.showerror("Error", f"Unable to register: {str(e)}")
     
     def show_notifications(self):
         """Show notifications view"""

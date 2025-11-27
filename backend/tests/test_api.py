@@ -203,6 +203,17 @@ class TestBookingsEndpoints:
         })
         self.token = response.json()["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
+        
+        # Create a fresh attendee for public booking tests
+        import uuid
+        new_email = f"public_attendee_{uuid.uuid4().hex[:6]}@test.com"
+        reg = client.post("/auth/register", json={
+            "name": "Public Attendee",
+            "email": new_email,
+            "password": "attendeepass123",
+            "role": "attendee"
+        })
+        self.public_headers = {"Authorization": f"Bearer {reg.json()['token']}"} if reg.status_code == 201 else self.headers
     
     def test_get_bookings(self):
         """Test getting user bookings"""
@@ -211,6 +222,18 @@ class TestBookingsEndpoints:
         assert response.status_code == 200
         bookings = response.json()
         assert isinstance(bookings, list)
+    
+    def test_public_bookings_and_register(self):
+        """Attendee should see open meetings and be able to register"""
+        public_resp = client.get("/bookings/public", headers=self.public_headers)
+        assert public_resp.status_code == 200
+        public_bookings = public_resp.json()
+        assert isinstance(public_bookings, list)
+        if public_bookings:
+            booking_id = public_bookings[0]["id"]
+            join_resp = client.post(f"/bookings/{booking_id}/register", headers=self.public_headers)
+            assert join_resp.status_code == 200
+            assert "registered" in join_resp.json().get("message", "").lower()
     
     def test_create_booking_missing_fields(self):
         """Test creating booking with missing fields"""

@@ -174,6 +174,21 @@ class AuthManager:
     
     def show_error(self, message):
         """Display error message"""
+        # If the label was destroyed (e.g., screen cleared), recreate it
+        try:
+            exists = self.error_label.winfo_exists()
+        except Exception:
+            exists = False
+        if not exists:
+            self.error_label = IconLabel(
+                self.error_container,
+                text="",
+                font=('SF Pro Text', 10),
+                bg=COLORS['surface'],
+                fg=COLORS['danger'],
+                wraplength=320,
+                anchor='w'
+            )
         if not self.error_label.winfo_ismapped():
             self.error_label.pack(fill=tk.X, pady=(0, 15))
         self.error_label.config(text=f"× {message}", fg=COLORS['danger'])

@@ -335,6 +335,25 @@ def get_upcoming_bookings(current_user: User = Depends(get_current_user)) -> Lis
     return [booking_to_response(b, current_user) for b in sorted_bookings]
 
 
+@router.get("/bookings/public", response_model=List[BookingResponse])
+def get_public_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
+    """
+    Return upcoming bookings the user is NOT already part of.
+    Allows attendees to browse and self-register for open meetings.
+    """
+    now = datetime.utcnow()
+    public = [
+        b for b in BOOKINGS
+        if b.start_time > now
+        and b.status == "confirmed"
+        and current_user.id not in b.attendee_ids
+        and current_user.id not in b.pending_attendee_ids
+        and b.organiser_id != current_user.id
+    ]
+    public.sort(key=lambda b: b.start_time)
+    return [booking_to_response(b, current_user) for b in public]
+
+
 @router.get("/bookings/organized", response_model=List[BookingResponse])
 def get_organized_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
     """Return bookings organized by the current user."""
@@ -679,6 +698,50 @@ def accept_invitation(booking_id: int, current_user: User = Depends(get_current_
     
     return {
         "message": "Successfully accepted invitation",
+        "booking_id": booking_id,
+        "booking_title": booking.title,
+        "start_time": booking.start_time.isoformat()
+    }
+
+
+@router.post("/bookings/{booking_id}/register", status_code=200)
+def register_for_booking(booking_id: int, current_user: User = Depends(get_current_user)) -> dict:
+    """
+    Self-register for a booking the user is not invited to.
+    """
+    idx = _booking_index(booking_id)
+    booking = BOOKINGS[idx]
+
+    if booking.organiser_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Organisers are already part of their bookings")
+    if current_user.id in booking.attendee_ids:
+        raise HTTPException(status_code=400, detail="You are already attending this booking")
+    if current_user.id in booking.pending_attendee_ids:
+        raise HTTPException(status_code=400, detail="You already have a pending invitation")
+    if booking.start_time < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Cannot join a meeting that has already started")
+
+    room = next((r for r in ROOMS if r.id == booking.room_id), None)
+    if room:
+        total_people = len(booking.attendee_ids) + 1 + 1  # existing attendees + organiser + new person
+        if total_people > room.capacity:
+            raise HTTPException(status_code=400, detail="Booking is at full capacity")
+
+    booking.attendee_ids.append(current_user.id)
+    save_bookings(BOOKINGS)
+
+    # Notify organiser about new attendee
+    create_notification(
+        user_id=booking.organiser_id,
+        notif_type="invitation_accepted",
+        title="New Attendee Registered",
+        message=f"{current_user.name} registered for your meeting '{booking.title}' on "
+                f"{booking.start_time.strftime('%Y-%m-%d at %H:%M')}.",
+        booking_id=booking.id
+    )
+
+    return {
+        "message": "Successfully registered for booking",
         "booking_id": booking_id,
         "booking_title": booking.title,
         "start_time": booking.start_time.isoformat()
