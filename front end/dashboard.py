@@ -1155,7 +1155,6 @@ Notes: {booking.get('notes', 'None')}
                 "room_id": selected_room["id"],
                 "attendee_emails": all_attendee_emails,  # All attendees (existing + new)
                 "notes": notes,
-                "visibility": "private"  # Default visibility
             }
             
             response = self.app.api_client.update_booking(self.editing_booking_id, booking_data)
