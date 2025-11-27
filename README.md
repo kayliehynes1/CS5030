@@ -41,6 +41,7 @@ python3.11 main.py
 |---------|--------------------------------|---------------|
 | Student | alicejohnson@st-andrews.ac.uk  | password123   |
 | Staff   | chloesmith@st-andrews.ac.uk    | password2025  |
+| Student | benlee@st-andrews.ac.uk        | password012!  |
 
 ## Running Tests
 
