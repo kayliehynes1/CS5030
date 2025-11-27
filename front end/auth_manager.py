@@ -1,151 +1,427 @@
+"""
+Modern Authentication Manager
+Beautiful, user-friendly login and registration
+"""
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+import re
+from ui_components import ModernButton, ModernEntry, Card, ScrollableFrame, IconLabel, COLORS
 
 
 class AuthManager:
     def __init__(self, app):
         self.app = app
         self.register_window = None
-
+        self.loading = False
+    
     def show_login_screen(self):
-        """Display login interface that authenticates via the backend."""
-        main_frame = ttk.Frame(self.app.root, padding="30")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-
-        self.app.root.columnconfigure(0, weight=1)
-        self.app.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-
-        ttk.Label(
-            main_frame,
-            text="University Room Booking System",
-            font=("Arial", 18, "bold"),
-        ).grid(row=0, column=0, columnspan=2, pady=(0, 30))
-
-        ttk.Label(
-            main_frame,
-            text="Please login with your email and password",
-            font=("Arial", 12),
-        ).grid(row=1, column=0, columnspan=2, pady=(0, 20))
-
-        ttk.Label(main_frame, text="Email:", font=("Arial", 10)).grid(
-            row=2, column=0, sticky=tk.W, pady=8
+        """Display beautiful login interface"""
+        # Reset loading state (important for re-login after logout)
+        self.loading = False
+        
+        # Gradient-style background (two-tone)
+        bg_frame = tk.Frame(self.app.root, bg='#F8FAFC')
+        bg_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Top accent bar
+        accent_bar = tk.Frame(bg_frame, bg=COLORS['primary'], height=4)
+        accent_bar.pack(fill=tk.X)
+        
+        # Center container
+        center = tk.Frame(bg_frame, bg='#F8FAFC')
+        center.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+        
+        # Logo/Title area with modern design
+        header = tk.Frame(center, bg='#F8FAFC')
+        header.pack(pady=(0, 45))
+        
+        # Modern minimalist logo
+        logo_canvas = tk.Canvas(
+            header,
+            width=100,
+            height=100,
+            bg='#F8FAFC',
+            highlightthickness=0
         )
-        self.email_entry = ttk.Entry(main_frame, width=35, font=("Arial", 10))
-        self.email_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-
-        ttk.Label(main_frame, text="Password:", font=("Arial", 10)).grid(
-            row=3, column=0, sticky=tk.W, pady=8
+        logo_canvas.pack()
+        
+        # Draw sophisticated logo - overlapping rounded squares
+        logo_canvas.create_rectangle(15, 15, 65, 65, fill=COLORS['primary'], outline='', width=0)
+        logo_canvas.create_rectangle(35, 35, 85, 85, fill=COLORS['accent'], outline='', width=0)
+        logo_canvas.create_rectangle(42, 42, 58, 58, fill='#FFFFFF', outline='', width=0)
+        
+        # Title with gradient-like effect
+        tk.Label(
+            header,
+            text="Room Booking",
+            font=('SF Pro Display', 32, 'bold'),
+            bg='#F8FAFC',
+            fg=COLORS['text']
+        ).pack(pady=(18, 0))
+        
+        tk.Label(
+            header,
+            text="SYSTEM",
+            font=('SF Pro Display', 14, 'bold'),
+            bg='#F8FAFC',
+            fg=COLORS['primary']
+        ).pack(pady=(0, 8))
+        
+        # Subtitle with better styling
+        subtitle_frame = tk.Frame(header, bg='#F8FAFC')
+        subtitle_frame.pack()
+        
+        tk.Label(
+            subtitle_frame,
+            text="University of St Andrews",
+            font=('SF Pro Text', 12),
+            bg='#F8FAFC',
+            fg=COLORS['text_secondary']
+        ).pack()
+        
+        # Login card
+        login_card = Card(center, padding=35)
+        login_card.pack()
+        login_card.config(width=400)
+        
+        # Welcome message
+        tk.Label(
+            login_card.container,
+            text="Welcome back",
+            font=('SF Pro Display', 20, 'bold'),
+            bg=COLORS['surface'],
+            fg=COLORS['text']
+        ).pack(anchor='w', pady=(0, 8))
+        
+        tk.Label(
+            login_card.container,
+            text="Sign in to manage your bookings",
+            font=('SF Pro Text', 11),
+            bg=COLORS['surface'],
+            fg=COLORS['text_secondary']
+        ).pack(anchor='w', pady=(0, 25))
+        
+        # Email field
+        self.email_entry = ModernEntry(
+            login_card.container,
+            label="Email Address",
+            placeholder="your.email@st-andrews.ac.uk",
+            width=35
         )
-        self.password_entry = ttk.Entry(main_frame, width=35, show="*", font=("Arial", 10))
-        self.password_entry.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-
-        btn_frame = ttk.Frame(main_frame)
-        btn_frame.grid(row=4, column=0, columnspan=2, pady=20)
-
-        ttk.Button(btn_frame, text="Login", command=self.login).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="Create Account", command=self.show_register_window).pack(
-            side=tk.LEFT, padx=5
+        self.email_entry.pack(fill=tk.X, pady=(0, 15))
+        
+        # Password field
+        self.password_entry = ModernEntry(
+            login_card.container,
+            label="Password",
+            placeholder="Enter your password",
+            show="•",
+            width=35
         )
-
-        self.app.root.bind("<Return>", lambda event: self.login())
+        self.password_entry.pack(fill=tk.X, pady=(0, 20))
+        
+        # Error message label (hidden by default)
+        self.error_label = IconLabel(
+            login_card.container,
+            text="",
+            icon='error',
+            font=('SF Pro Text', 10),
+            bg=COLORS['surface'],
+            fg=COLORS['danger'],
+            wraplength=320,
+            anchor='w'
+        )
+        self.error_label.pack(pady=(0, 15), fill=tk.X)
+        
+        # Login button
+        ModernButton(
+            login_card.container,
+            text="Sign In",
+            command=self.login,
+            style='primary',
+            width=35
+        ).pack(fill=tk.X, pady=(0, 15))
+        
+        # Divider
+        divider_frame = tk.Frame(login_card.container, bg=COLORS['surface'])
+        divider_frame.pack(fill=tk.X, pady=15)
+        
+        tk.Frame(divider_frame, bg=COLORS['border'], height=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Label(
+            divider_frame,
+            text="  or  ",
+            bg=COLORS['surface'],
+            fg=COLORS['text_secondary'],
+            font=('SF Pro Text', 9)
+        ).pack(side=tk.LEFT)
+        tk.Frame(divider_frame, bg=COLORS['border'], height=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Register button
+        ModernButton(
+            login_card.container,
+            text="Create New Account",
+            command=self.show_register_window,
+            style='secondary',
+            width=35
+        ).pack(fill=tk.X)
+        
+        # Bind Enter key for login (multiple bindings for better UX)
+        self.app.root.bind("<Return>", lambda e: self.login())
+        self.email_entry.entry.bind("<Return>", lambda e: self.login())
+        self.password_entry.entry.bind("<Return>", lambda e: self.login())
+        
+        # Focus first field
         self.email_entry.focus()
-
+    
+    def show_error(self, message):
+        """Display error message"""
+        self.error_label.config(text=f"× {message}", fg=COLORS['danger'])
+    
+    def clear_error(self):
+        """Clear error message"""
+        self.error_label.config(text="")
+    
+    def validate_email(self, email):
+        """Basic email validation"""
+        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return re.match(pattern, email) is not None
+    
     def login(self):
-        """Handle login process via backend /auth/login."""
+        """Handle login with validation and feedback"""
+        if self.loading:
+            return
+        
+        self.clear_error()
         email = self.email_entry.get().strip()
         password = self.password_entry.get()
-
+        
+        # Validation
         if not email:
-            messagebox.showerror("Error", "Please enter your email address")
+            self.show_error("Please enter your email address")
             self.email_entry.focus()
             return
-
+        
+        if not self.validate_email(email):
+            self.show_error("Please enter a valid email address")
+            self.email_entry.focus()
+            return
+        
         if not password:
-            messagebox.showerror("Error", "Please enter your password")
+            self.show_error("Please enter your password")
             self.password_entry.focus()
             return
-
-        self.email_entry.config(state="disabled")
-        self.password_entry.config(state="disabled")
-
+        
+        # Start loading state
+        self.loading = True
+        
         try:
             response = self.app.api_client.login(email, password)
             if response and "token" in response:
+                # Success!
                 self.app.handle_login_success(response.get("user", {}), response["token"])
             else:
-                messagebox.showerror("Login Failed", "Invalid email or password")
+                self.show_error("Login failed. Please try again.")
+                self.loading = False
         except Exception as exc:
-            messagebox.showerror("Login Error", f"Unable to login: {exc}")
-        finally:
-            self.email_entry.config(state="normal")
-            self.password_entry.config(state="normal")
-
+            error_msg = str(exc)
+            if "401" in error_msg or "Invalid" in error_msg:
+                self.show_error("Invalid email or password")
+            elif "423" in error_msg or "locked" in error_msg.lower():
+                self.show_error("Account locked. Please try again later.")
+            elif "connect" in error_msg.lower():
+                self.show_error("Cannot connect to server. Is the backend running?")
+            else:
+                self.show_error(f"Login error: {error_msg}")
+            self.loading = False
+    
     def show_register_window(self):
-        """Open a separate window for account creation."""
-        if self.register_window and self.register_window.winfo_exists():
-            self.register_window.lift()
-            return
-
+        """Modern registration window"""
+        try:
+            if self.register_window and self.register_window.winfo_exists():
+                self.register_window.lift()
+                return
+        except:
+            self.register_window = None
+        
+        # Create top-level window
         self.register_window = tk.Toplevel(self.app.root)
         self.register_window.title("Create Account")
+        self.register_window.geometry("450x600")
+        self.register_window.configure(bg=COLORS['background'])
+        self.register_window.resizable(False, False)
+        
+        # Make modal
+        self.register_window.transient(self.app.root)
         self.register_window.grab_set()
-
-        frame = ttk.Frame(self.register_window, padding="20")
-        frame.grid(row=0, column=0, sticky=(tk.N, tk.S, tk.E, tk.W))
-        self.register_window.columnconfigure(0, weight=1)
-        self.register_window.rowconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
-
-        ttk.Label(frame, text="Name:", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, pady=8)
-        self.reg_name = ttk.Entry(frame, width=30)
-        self.reg_name.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-
-        ttk.Label(frame, text="Email:", font=("Arial", 10)).grid(row=1, column=0, sticky=tk.W, pady=8)
-        self.reg_email = ttk.Entry(frame, width=30)
-        self.reg_email.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-
-        ttk.Label(frame, text="Password:", font=("Arial", 10)).grid(
-            row=2, column=0, sticky=tk.W, pady=8
+        
+        # Main container
+        main = tk.Frame(self.register_window, bg=COLORS['background'])
+        main.pack(fill=tk.BOTH, expand=True, padx=30, pady=30)
+        
+        # Header
+        tk.Label(
+            main,
+            text="Create Your Account",
+            font=('SF Pro Display', 22, 'bold'),
+            bg=COLORS['background'],
+            fg=COLORS['text']
+        ).pack(anchor='w', pady=(0, 8))
+        
+        tk.Label(
+            main,
+            text="Join the room booking system",
+            font=('SF Pro Text', 11),
+            bg=COLORS['background'],
+            fg=COLORS['text_secondary']
+        ).pack(anchor='w', pady=(0, 30))
+        
+        # Form fields
+        self.reg_name = ModernEntry(main, label="Full Name", placeholder="John Doe", width=40)
+        self.reg_name.pack(fill=tk.X, pady=(0, 15))
+        
+        self.reg_email = ModernEntry(main, label="Email Address", placeholder="your.email@st-andrews.ac.uk", width=40)
+        self.reg_email.pack(fill=tk.X, pady=(0, 15))
+        
+        self.reg_password = ModernEntry(main, label="Password", placeholder="Minimum 8 characters", show="•", width=40)
+        self.reg_password.pack(fill=tk.X, pady=(0, 15))
+        
+        # Role selection
+        role_frame = tk.Frame(main, bg=COLORS['background'])
+        role_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(
+            role_frame,
+            text="I am a:",
+            font=('SF Pro Display', 10, 'bold'),
+            bg=COLORS['background'],
+            fg=COLORS['text']
+        ).pack(anchor='w', pady=(0, 8))
+        
+        self.role_var = tk.StringVar(value="student")
+        
+        role_options = tk.Frame(role_frame, bg=COLORS['background'])
+        role_options.pack(fill=tk.X)
+        
+        for role, label in [('student', '● Student'), ('staff', '● Staff Member')]:
+            rb = tk.Radiobutton(
+                role_options,
+                text=label,
+                variable=self.role_var,
+                value=role,
+                font=('SF Pro Text', 11),
+                bg=COLORS['background'],
+                fg=COLORS['text'],
+                selectcolor=COLORS['primary'],
+                activebackground=COLORS['background'],
+                cursor='hand2'
+            )
+            rb.pack(anchor='w', pady=4)
+        
+        # Error message
+        self.reg_error_label = IconLabel(
+            main,
+            text="",
+            icon='error',
+            font=('SF Pro Text', 10),
+            bg=COLORS['background'],
+            fg=COLORS['danger'],
+            wraplength=350,
+            anchor='w'
         )
-        self.reg_password = ttk.Entry(frame, width=30, show="*")
-        self.reg_password.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-
-        ttk.Label(frame, text="Role:", font=("Arial", 10)).grid(row=3, column=0, sticky=tk.W, pady=8)
-        self.reg_role = ttk.Combobox(
-            frame, values=["Student", "Staff"], state="readonly", width=28
-        )
-        self.reg_role.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=8, padx=(10, 0))
-        self.reg_role.set("Student")
-
-        btns = ttk.Frame(frame)
-        btns.grid(row=4, column=0, columnspan=2, pady=15)
-        ttk.Button(btns, text="Create Account", command=self.register_user).pack(side=tk.LEFT, padx=5)
-        ttk.Button(btns, text="Cancel", command=self._close_register_window).pack(side=tk.LEFT, padx=5)
-
+        self.reg_error_label.pack(pady=(10, 15), fill=tk.X)
+        
+        # Buttons
+        btn_frame = tk.Frame(main, bg=COLORS['background'])
+        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        ModernButton(
+            btn_frame,
+            text="Create Account",
+            command=self.register_user,
+            style='primary',
+            width=20
+        ).pack(side=tk.LEFT, padx=(0, 10))
+        
+        ModernButton(
+            btn_frame,
+            text="Cancel",
+            command=self._close_register_window,
+            style='secondary',
+            width=15
+        ).pack(side=tk.LEFT)
+    
     def register_user(self):
-        """Submit new account details to backend /auth/register."""
+        """Register with comprehensive validation"""
+        # Clear previous errors
+        self.reg_error_label.config(text="")
+        
+        # Get values
         name = self.reg_name.get().strip()
         email = self.reg_email.get().strip()
         password = self.reg_password.get()
-        role = self.reg_role.get().strip() or "Student"
-
-        if not name or not email or not password:
-            messagebox.showerror("Error", "Please fill in all fields")
+        role = self.role_var.get()
+        
+        # Validation
+        if not name:
+            self.reg_error_label.config(text="× Please enter your full name", fg=COLORS['danger'])
+            self.reg_name.focus()
             return
-
+        
+        if len(name) < 2:
+            self.reg_error_label.config(text="× Name must be at least 2 characters", fg=COLORS['danger'])
+            self.reg_name.focus()
+            return
+        
+        if not email:
+            self.reg_error_label.config(text="× Please enter your email address", fg=COLORS['danger'])
+            self.reg_email.focus()
+            return
+        
+        if not self.validate_email(email):
+            self.reg_error_label.config(text="× Please enter a valid email address", fg=COLORS['danger'])
+            self.reg_email.focus()
+            return
+        
+        if not password:
+            self.reg_error_label.config(text="× Please enter a password", fg=COLORS['danger'])
+            self.reg_password.focus()
+            return
+        
+        if len(password) < 8:
+            self.reg_error_label.config(text="× Password must be at least 8 characters", fg=COLORS['danger'])
+            self.reg_password.focus()
+            return
+        
+        # Attempt registration
         try:
             response = self.app.api_client.register(name, email, password, role)
-            messagebox.showinfo("Success", "Account created. You can now log in.")
-            self.email_entry.delete(0, tk.END)
-            self.email_entry.insert(0, email)
-            self.password_entry.delete(0, tk.END)
-            self.password_entry.insert(0, password)
+            
+            # Success!
+            messagebox.showinfo(
+                "Account Created",
+                f"Welcome, {name}!\n\nYour account has been created successfully.\nYou can now sign in."
+            )
+            
+            # Pre-fill login form
+            self.email_entry.set(email)
+            self.password_entry.set(password)
+            
             self._close_register_window()
+            
         except Exception as exc:
-            messagebox.showerror("Registration Error", f"Unable to create account: {exc}")
-
+            error_msg = str(exc)
+            if "409" in error_msg or "already registered" in error_msg.lower():
+                self.reg_error_label.config(text="× This email is already registered", fg=COLORS['danger'])
+            elif "connect" in error_msg.lower():
+                self.reg_error_label.config(text="× Cannot connect to server", fg=COLORS['danger'])
+            else:
+                self.reg_error_label.config(text=f"× {error_msg}", fg=COLORS['danger'])
+    
     def _close_register_window(self):
-        if self.register_window and self.register_window.winfo_exists():
-            self.register_window.destroy()
-        self.register_window = None
+        if self.register_window:
+            try:
+                self.register_window.destroy()
+            except:
+                pass
+            self.register_window = None
+
