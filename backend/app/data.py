@@ -34,15 +34,14 @@ class Booking(BaseModel):
     notes: Optional[str] = None
     start_time: datetime
     end_time: datetime
-    visibility: str = "private" 
     status: str = "confirmed" 
     reminder_sent: bool = False  # Track if 1-hour reminder was sent
 
 class Notification(BaseModel):
     """Notification model for user notifications"""
     id: int
-    user_id: int  # Recipient of notification
-    type: str  # "booking_cancelled", "invitation_declined", "booking_reminder"
+    user_id: int 
+    type: str 
     title: str
     message: str
     booking_id: Optional[int] = None
@@ -56,7 +55,6 @@ class CreateBookingRequest(BaseModel):
     start_time: str
     end_time: str
     notes: Optional[str] = None
-    visibility: str = "private"
     attendee_emails: List[str] = []
 
 class CancelBookingRequest(BaseModel):

@@ -421,14 +421,10 @@ def _ensure_room_available(room_id: int, start: datetime, end: datetime, *, excl
 
 
 @router.post("/bookings", response_model=BookingResponse, status_code=201)
-def create_booking(
-    req: CreateBookingRequest,
-    current_user: User = Depends(get_current_user)
-) -> BookingResponse:
+def create_booking(req: CreateBookingRequest, current_user: User = Depends(get_current_user)) -> BookingResponse:
     """
     Create a new booking with validation
     """
-
     start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     room = _get_room_or_404(req.room_id)
     attendee_ids = _resolve_attendees(req.attendee_emails)
@@ -449,7 +445,6 @@ def create_booking(
         notes=req.notes,
         start_time=start,
         end_time=end,
-        visibility=req.visibility,
         status="confirmed",
         reminder_sent=False
     )
@@ -461,11 +456,7 @@ def create_booking(
 
 
 @router.put("/bookings/{booking_id}", response_model=BookingResponse)
-def update_booking(
-    booking_id: int,
-    req: CreateBookingRequest,
-    current_user: User = Depends(get_current_user)
-) -> BookingResponse:
+def update_booking(booking_id: int, req: CreateBookingRequest, current_user: User = Depends(get_current_user)) -> BookingResponse:
     """
     Update a booking (organiser-only).
     """
@@ -504,7 +495,6 @@ def update_booking(
         "notes": req.notes,
         "start_time": start,
         "end_time": end,
-        "visibility": req.visibility,
     })
 
     BOOKINGS[idx] = updated_booking
@@ -559,39 +549,20 @@ def delete_booking(
 
 
 @router.get("/bookings/{booking_id}", response_model=BookingResponse)
-def get_booking_details(
-    booking_id: int,
-    current_user: User = Depends(get_current_user)
-) -> BookingResponse:
+def get_booking_details(booking_id: int, current_user: User = Depends(get_current_user)) -> BookingResponse:
     """
     Get details of a specific booking.
-    
     Allows users to view booking information before accepting/declining.
-    Privacy: Only organiser, attendees, or public bookings viewable.
     """
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
-    
-    # Privacy check for private bookings
-    if booking.visibility == "private":
-        # Only organiser and current attendees can view
-        is_organiser = current_user.id == booking.organiser_id
-        is_attendee = current_user.id in booking.attendee_ids
-        
-        if not (is_organiser or is_attendee):
-            raise HTTPException(
-                status_code=403, 
-                detail="You do not have access to this private booking"
-            )
+
     
     return booking_to_response(booking, current_user)
 
 
 @router.post("/bookings/{booking_id}/accept", status_code=200)
-def accept_invitation(
-    booking_id: int,
-    current_user: User = Depends(get_current_user)
-) -> dict:
+def accept_invitation(booking_id: int, current_user: User = Depends(get_current_user)) -> dict:
     """
     Accept an invitation to a booking.
     """
@@ -644,11 +615,7 @@ def accept_invitation(
 
 
 @router.post("/bookings/{booking_id}/decline", status_code=200)
-def decline_invitation(
-    booking_id: int,
-    current_user: User = Depends(get_current_user),
-    body: DeclineInvitationRequest = None
-) -> dict:
+def decline_invitation(booking_id: int, current_user: User = Depends(get_current_user), body: DeclineInvitationRequest = None) -> dict:
     """
     Decline an invitation or cancel attendance.
     """
@@ -737,10 +704,7 @@ def get_unread_count(current_user: User = Depends(get_current_user)) -> dict:
 
 
 @router.put("/notifications/{notification_id}/read", status_code=200)
-def mark_notification_read(
-    notification_id: int,
-    current_user: User = Depends(get_current_user)
-) -> dict:
+def mark_notification_read(notification_id: int, current_user: User = Depends(get_current_user)) -> dict:
     """Mark a notification as read."""
     # Find notification
     notification = next((n for n in NOTIFICATIONS if n.id == notification_id), None)
@@ -760,10 +724,7 @@ def mark_notification_read(
 
 
 @router.delete("/notifications/{notification_id}", status_code=204)
-def delete_notification(
-    notification_id: int,
-    current_user: User = Depends(get_current_user)
-) -> None:
+def delete_notification(notification_id: int, current_user: User = Depends(get_current_user)) -> None:
     """Delete a notification."""
     # Find notification
     for idx, notification in enumerate(NOTIFICATIONS):
