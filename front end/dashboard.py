@@ -1217,7 +1217,6 @@ Notes: {booking.get('notes', 'None')}
                 "room_id": selected_room["id"],
                 "attendee_emails": all_attendee_emails,  # All attendees (existing + new)
                 "notes": notes,
-                "visibility": "private"  # Default visibility
             }
             
             response = self.app.api_client.update_booking(self.editing_booking_id, booking_data)
@@ -1265,10 +1264,18 @@ Notes: {booking.get('notes', 'None')}
                                               "sound system", "computers", "recording", "microphone", "coffee machine"],
                                        state="readonly", width=18)
         facilities_combo.grid(row=0, column=3, padx=(0, 20))
+
+        # Accessibility filter
+        ttk.Label(filter_frame, text="Accessibility:").grid(row=0, column=4, sticky=tk.W, padx=(0, 10))
+        self.accessibility_var = tk.StringVar(value="Any")
+        accessibility_combo = ttk.Combobox(filter_frame, textvariable=self.accessibility_var,
+                                        values=["Any", "Wheelchair Accessible", "Hearing Loop"],
+                                        state="readonly", width=15)
+        accessibility_combo.grid(row=0, column=5, padx=(0, 20))
         
         # Apply filters button
         ttk.Button(filter_frame, text="Apply Filters", 
-                  command=self.load_rooms).grid(row=0, column=4)
+                  command=self.load_rooms).grid(row=0, column=6)
         
         # Create scrollable canvas for rooms
         canvas_container = ttk.Frame(main_frame)
@@ -1349,46 +1356,62 @@ Notes: {booking.get('notes', 'None')}
             elif capacity_filter == "Large (16+)":
                 filtered_rooms = [r for r in filtered_rooms if r.get('capacity', 0) >= 16]
         
-        # Facilities filter - case insensitive matching
+        # Facilities filter 
         facilities_filter = self.facilities_var.get()
         if facilities_filter != "Any":
-            # Convert filter to lowercase for comparison
             filter_lower = facilities_filter.lower()
-            # Check if any facility in the room contains the filter text (case-insensitive)
+            # Check if any facility in the room contains the filter text
             filtered_rooms = [
                 r for r in filtered_rooms 
                 if any(filter_lower in facility.lower() for facility in r.get('facilities', []))
+            ]
+
+        # Accessibility filter
+        accessibility_filter = self.accessibility_var.get()
+        if accessibility_filter != "Any":
+            filter_lower = accessibility_filter.lower()
+            # Check if any accessibility feature in the room contains the filter text
+            filtered_rooms = [
+                r for r in filtered_rooms 
+                if any(filter_lower in feature.lower() for feature in r.get('accessibility', []))
             ]
         
         return filtered_rooms
     
     def _create_room_card(self, room, index):
         """Create a room card display"""
-        # Create card frame
-        card_frame = ttk.LabelFrame(self.rooms_frame, text=room['name'], padding="15")
-        card_frame.pack(fill=tk.X, pady=8, padx=10)
+        card_frame = ttk.Frame(self.rooms_frame, relief='solid', borderwidth=1, padding="10")
+        card_frame.pack(fill=tk.X, pady=5, padx=10)
         
-        # Info row
-        info_frame = ttk.Frame(card_frame)
-        info_frame.pack(fill=tk.X, pady=(0, 10))
+        # Room name and building
+        name_label = ttk.Label(card_frame, text=room['name'], font=('Arial', 12, 'bold'))
+        name_label.grid(row=0, column=0, sticky=tk.W)
         
-        # Building
-        ttk.Label(info_frame, text=f"Building: {room.get('building', 'N/A')}", 
-                 font=('Arial', 10)).pack(side=tk.LEFT, padx=(0, 20))
+        building_label = ttk.Label(card_frame, text=f"Building: {room.get('building', 'N/A')}", 
+                                 font=('Arial', 9), foreground='gray')
+        building_label.grid(row=1, column=0, sticky=tk.W)
         
-        # Capacity
-        ttk.Label(info_frame, text=f"Capacity: {room['capacity']} people", 
-                 font=('Arial', 10, 'bold')).pack(side=tk.LEFT, padx=(0, 20))
+        # Capacity, facilities, and accesibility
+        capacity_label = ttk.Label(card_frame, text=f"Capacity: {room['capacity']} people")
+        capacity_label.grid(row=2, column=0, sticky=tk.W)
         
-        # Facilities
-        facilities = room.get('facilities', [])
-        facilities_text = ', '.join([f.capitalize() for f in facilities]) if facilities else "None"
-        ttk.Label(card_frame, text=f"Facilities: {facilities_text}", 
-                 font=('Arial', 9), wraplength=500).pack(fill=tk.X, pady=(0, 10))
+        facilities_text = f"Facilities: {', '.join(room.get('facilities', ['None']))}"
+        facilities_label = ttk.Label(card_frame, text=facilities_text, wraplength=400)
+        facilities_label.grid(row=3, column=0, sticky=tk.W)
+
+        accessibility = room.get('accessibility', [])
+        if accessibility:  # Only show if there are accessibility features
+            accessibility_text = f"Accessibility: {', '.join(accessibility)}"
+            accessibility_label = ttk.Label(card_frame, text=accessibility_text, wraplength=400)
+            accessibility_label.grid(row=4, column=0, sticky=tk.W)
         
-        # Book button
-        ttk.Button(card_frame, text="Book This Room", 
-                  command=lambda r=room: self.show_create_booking(preselected_room=r)).pack(anchor=tk.E)
+        # Add Create Booking button
+        book_button = ttk.Button(card_frame, text="Create Booking with this Room", 
+                                command=lambda r=room: self.show_create_booking(preselected_room=r))
+        book_button.grid(row=0, column=1, rowspan=4, padx=(10, 0), sticky=tk.E)
+        
+
+        card_frame.columnconfigure(0, weight=1)
     
     def show_profile(self):
         """Show user profile"""

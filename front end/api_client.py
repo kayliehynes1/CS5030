@@ -58,8 +58,6 @@ class APIClient:
             }
             raise Exception(error_map.get(response.status_code, f"HTTP {response.status_code}: {error_detail}"))
         except ValueError:
-            # ValueError catches JSONDecodeError (which inherits from ValueError)
-            # This happens when response.json() fails to parse the response
             raise Exception("Invalid JSON response from server")
         except Exception as e:
             raise Exception(f"Request failed: {str(e)}")
