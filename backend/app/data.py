@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from .auth import hash_password
 
 
@@ -57,13 +57,45 @@ class CreateBookingRequest(BaseModel):
     notes: Optional[str] = None
     attendee_emails: List[str] = []
 
+    @field_validator('title')
+    def validate_title(cls, v):
+        if len(v) > 200:
+            raise ValueError("Title must be less than 200 characters")
+        return v.strip()
+    
+    @field_validator('notes')
+    def validate_notes(cls, v):
+        if v and len(v) > 1000:
+            raise ValueError("Notes must be less than 1000 characters")
+        return v
+    
+    @field_validator('attendee_emails')
+    def validate_attendee_count(cls, v):
+        if len(v) > 50:
+            raise ValueError("Maximum 50 attendees allowed")
+        return v
+
 class CancelBookingRequest(BaseModel):
     """Request model for cancelling a booking with optional reason"""
     reason: Optional[str] = None
 
+    @field_validator('reason')
+    @classmethod
+    def validate_reason(cls, v):
+        if v and len(v) > 500:
+            raise ValueError("Reason must be less than 500 characters")
+        return v
+
 class DeclineInvitationRequest(BaseModel):
     """Request model for declining an invitation with optional reason"""
     reason: Optional[str] = None
+
+    @field_validator('reason')
+    @classmethod
+    def validate_reason(cls, v):
+        if v and len(v) > 500:
+            raise ValueError("Reason must be less than 500 characters")
+        return v
 
 class PublicUser(BaseModel):
     id: int
@@ -83,8 +115,8 @@ class BookingResponse(BaseModel):
     is_organizer: bool
     status: str
     notes: Optional[str] = None
-    attendee_emails: List[str] = Field(default_factory=list)  # Added for showing attendees
-    invitation_status: Optional[str] = None  # "pending", "accepted", or None (if organizer)
+    attendee_emails: List[str] = Field(default_factory=list)  
+    invitation_status: Optional[str] = None  
 
 class NotificationResponse(BaseModel):
     """Notification response for frontend"""
