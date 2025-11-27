@@ -40,6 +40,7 @@ from .validation import (
 )
 
 router = APIRouter()
+ORGANISER_ROLES = {"organiser"}
 
 
 def create_notification(user_id: int, notif_type: str, title: str, message: str, booking_id: int = None):
@@ -58,6 +59,15 @@ def create_notification(user_id: int, notif_type: str, title: str, message: str,
     NOTIFICATIONS.append(notification)
     save_notifications(NOTIFICATIONS)
     return notification
+
+
+def _require_organiser(user: User) -> None:
+    """Ensure the current user has organiser privileges."""
+    if user.role.lower() not in ORGANISER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Only organisers/organizers can perform this action"
+        )
 
 
 def process_booking_reminders():
@@ -161,7 +171,7 @@ def register(data: RegisterRequest) -> LoginResponse:
     - Email format and uniqueness
     - Name length (2-100 chars)
     - Password length (8-128 chars)
-    - Role (student/staff/admin)
+    - Role (attendee/organiser)
     """
     # Validate and sanitize inputs
     clean_name = validate_name(sanitize_string(data.name), "Name")
@@ -261,17 +271,11 @@ def list_users(current_user: User = Depends(get_current_user)) -> List[PublicUse
 
 @router.get("/rooms", response_model=List[Room])
 def list_rooms(current_user: User = Depends(get_current_user)) -> List[Room]:
-    """Return all rooms and their facilities. Filtered based on user role. """
-    if current_user.role.lower() == "staff":
+    """Return all rooms and their facilities. Organisers see all; attendees see unrestricted rooms."""
+    if current_user.role.lower() in ORGANISER_ROLES:
         return ROOMS
     
-    # If user is student (or other role), only show unrestricted rooms
-    filtered_rooms = [
-        room for room in ROOMS 
-        if not room.restricted_to
-    ]
-    
-    return filtered_rooms
+    return [room for room in ROOMS if not room.restricted_to]
 
 
 @router.get("/rooms/available", response_model=List[Room])
@@ -329,6 +333,25 @@ def get_upcoming_bookings(current_user: User = Depends(get_current_user)) -> Lis
     sorted_bookings = sorted(user_bookings, key=lambda b: b.start_time)
     
     return [booking_to_response(b, current_user) for b in sorted_bookings]
+
+
+@router.get("/bookings/public", response_model=List[BookingResponse])
+def get_public_bookings(current_user: User = Depends(get_current_user)) -> List[BookingResponse]:
+    """
+    Return upcoming bookings the user is NOT already part of.
+    Allows attendees to browse and self-register for open meetings.
+    """
+    now = datetime.utcnow()
+    public = [
+        b for b in BOOKINGS
+        if b.start_time > now
+        and b.status == "confirmed"
+        and current_user.id not in b.attendee_ids
+        and current_user.id not in b.pending_attendee_ids
+        and b.organiser_id != current_user.id
+    ]
+    public.sort(key=lambda b: b.start_time)
+    return [booking_to_response(b, current_user) for b in public]
 
 
 @router.get("/bookings/organized", response_model=List[BookingResponse])
@@ -468,6 +491,7 @@ def create_booking(req: CreateBookingRequest, current_user: User = Depends(get_c
     - Attendee emails are valid users
     - Room capacity not exceeded
     """
+    _require_organiser(current_user)
     # Validate title and notes
     clean_title = validate_title(sanitize_string(req.title))
     clean_notes = validate_notes(sanitize_string(req.notes))
@@ -509,6 +533,7 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
     
     Authorization: Only the booking organizer can update.
     """
+    _require_organiser(current_user)
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
@@ -519,7 +544,9 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
             detail="Only the booking organizer can update this booking"
         )
 
-
+    # Reuse creation sanitization/validation
+    clean_title = validate_title(sanitize_string(req.title))
+    clean_notes = validate_notes(sanitize_string(req.notes))
     start, end = _parse_request_times(req.date, req.start_time, req.end_time)
     new_attendee_ids = _resolve_attendees(req.attendee_emails)
     
@@ -546,8 +573,8 @@ def update_booking(booking_id: int, req: CreateBookingRequest, current_user: Use
         "room_id": req.room_id,
         "attendee_ids": accepted_attendees, 
         "pending_attendee_ids": all_pending,
-        "title": req.title,
-        "notes": req.notes,
+        "title": clean_title,
+        "notes": clean_notes,
         "start_time": start,
         "end_time": end,
     })
@@ -570,6 +597,7 @@ def delete_booking(
     
     Authorization: Only the booking organizer can delete.
     """
+    _require_organiser(current_user)
     idx = _booking_index(booking_id)
     booking = BOOKINGS[idx]
     
@@ -646,12 +674,10 @@ def accept_invitation(booking_id: int, current_user: User = Depends(get_current_
                 detail="You don't have a pending invitation to this booking"
             )
     
-    
-    # Validation: Check room capacity
+    # Validation: Check room capacity (organiser + accepted + pending, including self)
     room = next((r for r in ROOMS if r.id == booking.room_id), None)
     if room:
-        # Count: current accepted attendees + organiser + new person
-        total_people = len(booking.attendee_ids) + 1 + 1
+        total_people = len(booking.attendee_ids) + len(booking.pending_attendee_ids) + 1
         if total_people > room.capacity:
             raise HTTPException(
                 status_code=400, 
@@ -672,6 +698,50 @@ def accept_invitation(booking_id: int, current_user: User = Depends(get_current_
     
     return {
         "message": "Successfully accepted invitation",
+        "booking_id": booking_id,
+        "booking_title": booking.title,
+        "start_time": booking.start_time.isoformat()
+    }
+
+
+@router.post("/bookings/{booking_id}/register", status_code=200)
+def register_for_booking(booking_id: int, current_user: User = Depends(get_current_user)) -> dict:
+    """
+    Self-register for a booking the user is not invited to.
+    """
+    idx = _booking_index(booking_id)
+    booking = BOOKINGS[idx]
+
+    if booking.organiser_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Organisers are already part of their bookings")
+    if current_user.id in booking.attendee_ids:
+        raise HTTPException(status_code=400, detail="You are already attending this booking")
+    if current_user.id in booking.pending_attendee_ids:
+        raise HTTPException(status_code=400, detail="You already have a pending invitation")
+    if booking.start_time < datetime.utcnow():
+        raise HTTPException(status_code=400, detail="Cannot join a meeting that has already started")
+
+    room = next((r for r in ROOMS if r.id == booking.room_id), None)
+    if room:
+        total_people = len(booking.attendee_ids) + len(booking.pending_attendee_ids) + 1 + 1  # organiser + pending + accepted + new person
+        if total_people > room.capacity:
+            raise HTTPException(status_code=400, detail="Booking is at full capacity")
+
+    booking.attendee_ids.append(current_user.id)
+    save_bookings(BOOKINGS)
+
+    # Notify organiser about new attendee
+    create_notification(
+        user_id=booking.organiser_id,
+        notif_type="invitation_accepted",
+        title="New Attendee Registered",
+        message=f"{current_user.name} registered for your meeting '{booking.title}' on "
+                f"{booking.start_time.strftime('%Y-%m-%d at %H:%M')}.",
+        booking_id=booking.id
+    )
+
+    return {
+        "message": "Successfully registered for booking",
         "booking_id": booking_id,
         "booking_title": booking.title,
         "start_time": booking.start_time.isoformat()

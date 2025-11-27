@@ -189,10 +189,11 @@ class TestRoleValidation:
     
     def test_valid_roles(self):
         """Test valid role values"""
-        assert validate_role("student") == "student"
-        assert validate_role("staff") == "staff"
-        assert validate_role("STUDENT") == "student"  # Case insensitive
-        assert validate_role("  Staff  ") == "staff"  # Trimmed
+        assert validate_role("attendee") == "attendee"
+        assert validate_role("organiser") == "organiser"
+        assert validate_role("  organiser  ") == "organiser"  # Trimmed
+        # legacy alias support
+        assert validate_role("student") == "attendee"
     
     def test_invalid_role(self):
         """Test rejection of invalid role"""
@@ -201,10 +202,10 @@ class TestRoleValidation:
         assert exc_info.value.status_code == 400
         assert "Invalid role" in exc_info.value.detail
     
-    def test_empty_role_defaults_to_student(self):
-        """Test that empty role defaults to student"""
-        assert validate_role("") == "student"
-        assert validate_role(None) == "student"
+    def test_empty_role_defaults_to_attendee(self):
+        """Test that empty role defaults to attendee"""
+        assert validate_role("") == "attendee"
+        assert validate_role(None) == "attendee"
 
 
 class TestStringSanitization:
@@ -225,4 +226,3 @@ class TestStringSanitization:
         assert sanitize_string("") is None
         assert sanitize_string(None) is None
         assert sanitize_string("   ") is None
-

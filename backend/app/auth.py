@@ -51,7 +51,7 @@ class RegisterRequest(BaseModel):
     name: str
     email: str
     password: str
-    role: str = "student"
+    role: str = "attendee"
 
     @field_validator('name')
     @classmethod

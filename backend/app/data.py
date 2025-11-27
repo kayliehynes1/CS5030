@@ -129,9 +129,12 @@ class NotificationResponse(BaseModel):
     is_read: bool
 
 USERS: List[User] = [
-    User(id=1, name="Alice Johnson", email="alicejohnson@st-andrews.ac.uk", password_hash=hash_password("password123"), role="student"),
-    User(id=2, name="Ben Lee", email="benlee@st-andrews.ac.uk", password_hash=hash_password("password012!"), role="student"),
-    User(id=3, name="Chloe Smith", email="chloesmith@st-andrews.ac.uk", password_hash=hash_password("password2025"), role="staff"),
+    # Organiser with privileges to create/manage bookings
+    User(id=1, name="Alice Johnson", email="alicejohnson@st-andrews.ac.uk", password_hash=hash_password("password123"), role="organiser"),
+    # Default attendee (cannot create bookings)
+    User(id=2, name="Ben Lee", email="benlee@st-andrews.ac.uk", password_hash=hash_password("password012!"), role="attendee"),
+    # Second organiser
+    User(id=3, name="Chloe Smith", email="chloesmith@st-andrews.ac.uk", password_hash=hash_password("password2025"), role="organiser"),
 ]
 
 ROOMS: List[Room] = [
